@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BGE API compatibility — BGE Revived</title>
+  <meta name="description" content="Planned compatibility mapping between the classic Blender Game Engine Python API and BGE Revived.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="mark">B</span> BGE Revived</a>
+    <a class="link" href="index.html">Overview</a>
+    <a class="link" href="architecture.html">Architecture</a>
+    <a class="link" href="roadmap.html">Roadmap</a>
+    <a class="link" href="blender_integration.html">Blender</a>
+    <a class="link" href="blender_workflow.html">Workflow</a>
+    <a class="link" href="current_state.html">Current state</a>
+    <a class="link active" href="compatibility.html">Compatibility</a>
+    <span class="spacer"></span>
+    <span class="pill"><span class="dot"></span> M0 · Foundation</span>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="hero" style="padding-bottom: 16px;">
+    <div class="eyebrow">Compatibility</div>
+    <h1 style="font-size: clamp(34px, 5vw, 54px);">Familiar where it matters. Modern underneath.</h1>
+    <p class="lede">
+      Existing BGE projects should not need a full rewrite to benefit from the new runtime.
+      We expose a versioned <code>bge</code> module and map the most-used 2.49b-era concepts,
+      while documenting the places where a cleaner API is unavoidable.
+    </p>
+  </section>
+
+  <section>
+    <h2>Scripting mapping</h2>
+    <p class="sub">What the embedded <code>bge</code> module already provides, and what is still planned.</p>
+    <div class="card" style="padding: 8px 22px;">
+      <table>
+        <thead><tr><th>Classic BGE</th><th>BGE Revived</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><code>bge.types.Vector</code></td><td><code>bge.types.Vector</code></td><td><span class="badge done">Done</span> arithmetic, dot/cross, length, iteration</td></tr>
+          <tr><td><code>bge.types.Euler</code> / <code>Quaternion</code></td><td>same names</td><td><span class="badge done">Done</span> radians, tuple friendly</td></tr>
+          <tr><td><code>bge.objects["Name"]</code></td><td><code>bge.objects["Name"]</code></td><td><span class="badge done">Done</span> name indexed, raises <code>KeyError</code></td></tr>
+          <tr><td><code>object.location</code> / <code>rotation_euler</code> / <code>scale</code></td><td>same names</td><td><span class="badge done">Done</span> read and write</td></tr>
+          <tr><td><code>object.worldPosition</code></td><td>same name</td><td><span class="badge done">Done</span></td></tr>
+          <tr><td><code>object.applyRotation(axis, angle)</code></td><td>same name</td><td><span class="badge done">Done</span></td></tr>
+          <tr><td><code>object.visible</code></td><td>same name</td><td><span class="badge done">Done</span></td></tr>
+          <tr><td><code>bge.logic.scene.addObject(name)</code></td><td>same name</td><td><span class="badge done">Done</span> creates an entity</td></tr>
+          <tr><td><code>bge.app.handlers.frame_change</code> / <code>post_update</code></td><td>same names</td><td><span class="badge done">Done</span> called every frame</td></tr>
+          <tr><td><code>GameLogic.getCurrentController()</code></td><td><code>bge.logic.controller</code></td><td><span class="badge plan">Planned</span> thin wrapper around the active script component</td></tr>
+          <tr><td><code>controller.owner</code></td><td><code>bge.logic.entity</code></td><td><span class="badge plan">Planned</span> entity handle; stable across frames</td></tr>
+          <tr><td><code>scene.objects["Name"]</code></td><td><code>bge.logic.scene.objects["Name"]</code></td><td><span class="badge done">Done</span></td></tr>
+          <tr><td>Logic bricks</td><td>Native components + Python</td><td><span class="badge plan">Planned</span> data-driven components</td></tr>
+          <tr><td><code>Rasterizer</code> / <code>Material</code> APIs</td><td>Not mapped</td><td>Replaced by renderer resources and material assets</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Planned mapping</h2>
+    <div class="card" style="padding: 8px 22px;">
+      <table>
+        <thead><tr><th>Classic BGE</th><th>BGE Revived</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>GameLogic.getCurrentController()</code></td><td><code>bge.logic.controller</code></td><td>Thin wrapper around the active script component</td></tr>
+          <tr><td><code>controller.owner</code></td><td><code>bge.logic.entity</code></td><td>Entity handle; stable across frames</td></tr>
+          <tr><td><code>owner.worldPosition</code></td><td><code>entity.world_position</code></td><td>Vector-like proxy, batched writes</td></tr>
+          <tr><td><code>owner.applyRotation(axis, local)</code></td><td><code>entity.rotate(axis, local=False)</code></td><td>Quaternion-backed, no gimbal lock</td></tr>
+          <tr><td><code>scene.addObject(...)</code></td><td><code>bge.logic.scene.spawn(prefab, ...)</code></td><td>Prefab-based; explicit ownership</td></tr>
+          <tr><td><code>logic.addScene(...)</code></td><td><code>bge.logic.scenes.add(...)</code></td><td>Multiple scenes supported</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Compatibility rules</h2>
+    <div class="grid cols-2">
+      <div class="card"><h3>Behaviour first</h3><p>If a legacy call has a safe modern equivalent, the wrapper preserves its observable behaviour (units, local/world space, ordering). If not, it raises a clear error rather than silently doing something different.</p></div>
+      <div class="card"><h3>No hidden globals</h3><p>Global state is explicit on <code>bge.logic</code>. Scripts can still use the classic shims during migration; new code is encouraged to use entities and components directly.</p></div>
+      <div class="card"><h3>Versioned module</h3><p><code>bge.__version__</code> and a compatibility level report what is supported. Deprecations are documented and kept for at least one minor cycle.</p></div>
+      <div class="card"><h3>Performance honesty</h3><p>Per-frame Python property access is fine for gameplay, not for thousands of objects. Bulk APIs and native components exist for hot paths.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Blender scene compatibility</h2>
+    <p class="sub">What the exporter and importer currently carry across from a <code>.blend</code> file.</p>
+    <div class="card" style="padding: 8px 22px;">
+      <table>
+        <thead><tr><th>Blender data</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Sun / point / spot / area lights</td><td><span class="badge done">Supported</span></td><td>Energy, colour, radius, spot cone and blend, range, area size, one-sided emission</td></tr>
+          <tr><td>World background colour and strength</td><td><span class="badge done">Supported</span></td><td>Flat sky and procedural gradient</td></tr>
+          <tr><td>World environment texture</td><td><span class="badge wip">Partial</span></td><td>Equirectangular LDR and Radiance <code>.hdr</code>; vertical axis offset from Blender</td></tr>
+          <tr><td>Camera</td><td><span class="badge done">Supported</span></td><td>Lens, sensor fit, FOV, clip planes, orthographic scale, shift, active camera</td></tr>
+          <tr><td>Principled material values</td><td><span class="badge wip">Partial</span></td><td>Base colour, metallic, roughness, emission, alpha</td></tr>
+          <tr><td>Base colour and normal map textures</td><td><span class="badge wip">Partial</span></td><td>PNG/JPEG base colour, tangent-space normal maps with derivative tangents</td></tr>
+          <tr><td>Object geometry</td><td><span class="badge done">Supported</span></td><td>Meshes, modifiers, curves, text, mirrored transforms, baked world transforms</td></tr>
+          <tr><td>Exposure and view transform</td><td><span class="badge wip">Partial</span></td><td>Standard is exact; AgX and Filmic use an ACES approximation</td></tr>
+          <tr><td>Animation, armatures, particles, modifiers on the GPU</td><td><span class="badge plan">Not yet</span></td><td>Planned for M1 and M2</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Status</h2>
+    <div class="callout">
+      <strong>Partially implemented.</strong> The embedded CPython host and the core
+      <code>bge</code> module exist and are covered by the test suite: types, object lookup,
+      transforms, visibility, scene spawning and per-frame handlers. Controllers, logic bricks,
+      timers and scene switching are scheduled for M1. This page is the contract we will
+      implement against; it is intentionally published before the code so the API surface is
+      reviewed rather than accidental.
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>BGE Revived · compatibility</span>
+    <span><a href="architecture.html">Architecture</a> · <a href="roadmap.html">Roadmap</a></span>
+  </div>
+</footer>
+</body>
+</html>

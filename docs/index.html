@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BGE Revived — The Blender Game Engine, rebuilt</title>
+  <meta name="description" content="A clean-room, standalone revival of the Blender Game Engine: modern renderer, ECS, fixed timestep, Python gameplay, and a Blender live link.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="mark">B</span> BGE Revived</a>
+    <a class="link active" href="index.html">Overview</a>
+    <a class="link" href="architecture.html">Architecture</a>
+    <a class="link" href="roadmap.html">Roadmap</a>
+    <a class="link" href="blender_integration.html">Blender</a>
+    <a class="link" href="blender_workflow.html">Workflow</a>
+    <a class="link" href="current_state.html">Current state</a>
+    <a class="link" href="compatibility.html">Compatibility</a>
+    <span class="spacer"></span>
+    <span class="pill"><span class="dot"></span> M0 · Foundation</span>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div class="eyebrow">Clean-room revival · standalone runtime · Blender live link</div>
+    <h1>The Blender Game Engine,<br><span class="grad">rebuilt for what comes next.</span></h1>
+    <p class="lede">
+      BGE Revived is a from-scratch game engine inspired by the workflow of Blender 2.49b:
+      author in Blender, press play, and the engine runs your world. This time the runtime is
+      standalone, data-oriented, fixed-step, modern-rendered, and built to last.
+    </p>
+    <div class="hero-actions">
+      <a class="btn primary" href="current_state.html">See what works today →</a>
+      <a class="btn" href="blender_integration.html">Blender scene import</a>
+      <a class="btn" href="architecture.html">Read the architecture</a>
+      <a class="btn" href="roadmap.html">Roadmap</a>
+    </div>
+    <div class="stat-row">
+      <div class="stat"><div class="n">4.6</div><div class="l">OpenGL core</div></div>
+      <div class="stat"><div class="n">120 Hz</div><div class="l">fixed simulation</div></div>
+      <div class="stat"><div class="n">C++20</div><div class="l">engine core</div></div>
+      <div class="stat"><div class="n">0</div><div class="l">copied BGE lines</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Same workflow. None of the same walls.</h2>
+    <p class="sub">
+      The original BGE was ahead of its time, but it carried the constraints of 2001: a
+      single-threaded runtime, a fixed-function renderer, frame-rate-coupled logic, and an
+      editor bolted into Blender. We keep the good part — the direct connection between
+      authoring and playing — and replace everything underneath.
+    </p>
+    <div class="grid cols-3">
+      <div class="card">
+        <span class="icon">⚡</span>
+        <h3>Fixed-step simulation</h3>
+        <p>Gameplay, physics and scripts always see a constant 120 Hz delta. Rendering runs independently and interpolates, so a slow frame never changes how the game behaves.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🧱</span>
+        <h3>Data-oriented core</h3>
+        <p>Sparse-set ECS, generational entity handles, and a fork-join job system. Transform updates, culling, and animation can scale across cores instead of serialising through one scene graph.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🌅</span>
+        <h3>Modern renderer</h3>
+        <p>HDR forward shading, metallic/roughness PBR, directional shadows, instanced draw batching, frustum culling, ACES tone mapping and FXAA — with a Vulkan RHI planned.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🐍</span>
+        <h3>Python that fits</h3>
+        <p>Current CPython embedded in the runtime, with a narrow, versioned <code>bge</code> API. Native components do the hot work; Python handles gameplay and glue.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🎛️</span>
+        <h3>Blender stays the editor</h3>
+        <p>No second editor to maintain. A Blender addon will sync scenes and assets to the runtime and provide the 2.49b-style “press Play” loop over a live link. The file-based bridge already ships: export a <code>.blend</code> and render it headlessly.</p>
+      </div>
+      <div class="card">
+        <span class="icon">📦</span>
+        <h3>Cooked, not coupled</h3>
+        <p>glTF and image sources are imported, validated, and cooked into packs. A shipped game never needs Blender, Python source, or a <code>.blend</code> file to run.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What we are fixing</h2>
+    <p class="sub">A deliberate answer to each of the legacy engine's structural problems.</p>
+    <div class="card" style="padding: 8px 22px;">
+      <table>
+        <thead><tr><th>Legacy BGE</th><th>BGE Revived</th></tr></thead>
+        <tbody>
+          <tr><td>GPL-only source</td><td>Clean-room, permissively licensed engine and documented clean-room policy</td></tr>
+          <tr><td>Single-threaded runtime</td><td>Job system; parallel transforms, culling, animation, and async asset IO</td></tr>
+          <tr><td>Logic tied to render frame rate</td><td>Fixed 120 Hz simulation with render interpolation</td></tr>
+          <tr><td>Fixed-function / old OpenGL</td><td>OpenGL 4.6 DSA renderer today, RHI + Vulkan backend next</td></tr>
+          <tr><td>Bullet 2.x limitations</td><td>Jolt Physics, deterministic stepping, proper character controller</td></tr>
+          <tr><td>Editor embedded in Blender</td><td>Standalone runtime + Blender live-link addon</td></tr>
+          <tr><td>No asset pipeline</td><td>glTF/PNG import, dependency graph, cooked packs</td></tr>
+          <tr><td>Weak debugging</td><td>Profiler, remote console, validation, deterministic replay</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Build it today</h2>
+    <p class="sub">
+      The current build is intentionally dependency-light. On this machine the engine is built
+      with a vendored Zig toolchain, so no Visual Studio, CMake, or package manager is required.
+    </p>
+    <pre><span class="c"># from the repository root</span>
+python build.py            <span class="c"># build engine + sandbox</span>
+python build.py run        <span class="c"># build and launch the demo</span>
+python build.py test       <span class="c"># run math / ECS / job / script tests</span>
+python build.py --compiler mingw   <span class="c"># build with MinGW-w64 instead of Zig</span>
+
+<span class="c"># optional: the same build through CMake and Ninja</span>
+cmake -S . -B build/cmake -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/zig-windows.cmake
+cmake --build build/cmake
+
+<span class="c"># render a real Blender scene</span>
+blender --background scene.blend --python tools/bge_export.py -- --out build/scene
+build\bin\bge_sandbox.exe --scene build\scene\scene.bgescene --headless --screenshot out.png
+
+<span class="c"># drive the scene from Python</span>
+build\bin\bge_sandbox.exe --script assets\scripts\demo.py</pre>
+    <div class="callout">
+      <strong>Status:</strong> M1 is under active construction. The toolchain, platform layer,
+      ECS, job system, math library, forward PBR renderer and the Blender scene importer are
+      implemented and verified; the Python host, physics and the live Blender link are next. See
+      <a href="current_state.html">Current state</a> for the verified list rather than the
+      aspirational one, and <a href="blender_integration.html">Blender integration</a> for the
+      scene pipeline and its reference comparisons.
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>BGE Revived · clean-room standalone runtime</span>
+    <span>Docs mirror <code>current_state.md</code> and <code>roadmap.md</code></span>
+  </div>
+</footer>
+</body>
+</html>

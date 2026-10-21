@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Current state — BGE Revived</title>
+  <meta name="description" content="Verified implementation status of BGE Revived: toolchain, platform, ECS, jobs, renderer, Blender scene import and next actions.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="mark">B</span> BGE Revived</a>
+    <a class="link" href="index.html">Overview</a>
+    <a class="link" href="architecture.html">Architecture</a>
+    <a class="link" href="roadmap.html">Roadmap</a>
+    <a class="link" href="blender_integration.html">Blender</a>
+    <a class="link" href="blender_workflow.html">Workflow</a>
+    <a class="link active" href="current_state.html">Current state</a>
+    <a class="link" href="compatibility.html">Compatibility</a>
+    <span class="spacer"></span>
+    <span class="pill"><span class="dot"></span> M1 · Playable runtime</span>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="hero" style="padding-bottom: 14px;">
+    <div class="eyebrow">Current state · updated 2026-10-21</div>
+    <h1 style="font-size: clamp(34px, 5vw, 54px);">What is actually working.</h1>
+    <p class="lede">
+      A verified inventory, not a wish list. The Markdown source for this page is
+      <code>current_state.md</code>; it is updated with every meaningful change.
+    </p>
+    <div class="status-line" style="margin-top: 24px;">
+      <span class="badge wip">M1 in progress</span>
+      <span>Renderer and Blender scene import shipped · Python and physics next</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Module status</h2>
+    <div class="card" style="padding: 8px 22px;">
+      <table>
+        <thead><tr><th>Area</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Repository structure</td><td><span class="badge done">Done</span></td><td><code>engine/</code>, <code>sandbox/</code>, <code>tests/</code>, <code>tools/</code>, <code>assets/</code>, <code>docs/</code>, <code>cmake/</code></td></tr>
+          <tr><td>Toolchain</td><td><span class="badge done">Done</span></td><td>Vendored Zig 0.14.1 in <code>.toolchain/</code>; CMake 4.x + Ninja; MinGW-w64 GCC as an alternative</td></tr>
+          <tr><td>Build scripts</td><td><span class="badge done">Done</span></td><td><code>build.py</code> (incremental, content hashed, <code>--compiler zig|mingw</code>) and <code>CMakeLists.txt</code></td></tr>
+          <tr><td>Logging / assertions</td><td><span class="badge done">Done</span></td><td>Thread-safe ANSI console + debugger output</td></tr>
+          <tr><td>Math</td><td><span class="badge done">Done</span></td><td>Vectors, quaternion, column-major matrices, AABB, frustum, TRS decomposition</td></tr>
+          <tr><td>ECS</td><td><span class="badge done">Done</span></td><td>Sparse sets, generational handles, hierarchy</td></tr>
+          <tr><td>Job system</td><td><span class="badge done">Done</span></td><td>Fork-join pool, parallel-for</td></tr>
+          <tr><td>Fixed timestep</td><td><span class="badge done">Done</span></td><td>Spiral-of-death clamp, alpha for rendering</td></tr>
+          <tr><td>Platform window</td><td><span class="badge done">Done</span></td><td>Win32, DPI-aware, GL 4.6 core context, hidden popup for exact captures</td></tr>
+          <tr><td>Input</td><td><span class="badge done">Done</span></td><td>Keyboard/mouse, capture, wheel</td></tr>
+          <tr><td>Renderer</td><td><span class="badge done">Done</span></td><td>HDR PBR, shadow map, instancing, frustum culling, FXAA</td></tr>
+          <tr><td>Post processing</td><td><span class="badge done">Done</span></td><td>Exposure, Standard (linear to sRGB) and ACES/AgX-approximation transforms</td></tr>
+          <tr><td>Multi-light shading</td><td><span class="badge done">Done</span></td><td>Sun, point, spot and area lights in a single forward pass</td></tr>
+          <tr><td>Environment lighting</td><td><span class="badge wip">Partial</span></td><td>Equirectangular world maps (LDR and Radiance <code>.hdr</code>), approximated IBL</td></tr>
+          <tr><td>Materials</td><td><span class="badge wip">Partial</span></td><td>PBR set, base colour textures, normal maps, alpha blend and clip</td></tr>
+          <tr><td>Scene / transforms</td><td><span class="badge done">Done</span></td><td>Hierarchy, world matrices, visibility and shadow flags</td></tr>
+          <tr><td>Blender export / import</td><td><span class="badge done">Done</span></td><td><code>tools/bge_export.py</code> and <code>scene_loader.cpp</code> (<code>.bgescene</code> format)</td></tr>
+          <tr><td>Blender add-on</td><td><span class="badge done">Done</span></td><td><code>tools/blender_addon/bge_revival</code>: export, play, stop and package from the 3D View sidebar</td></tr>
+          <tr><td>Live link</td><td><span class="badge done">Done</span></td><td>The engine reloads the scene in place when the authoring tool rewrites it (<code>--watch</code>)</td></tr>
+          <tr><td>Engine preview</td><td><span class="badge done">Done</span></td><td>The engine renders into a watched folder (<code>--preview</code>) and the add-on mirrors the frames into Blender; about 160 ms round trip</td></tr>
+          <tr><td>Game template and packaging</td><td><span class="badge done">Done</span></td><td><code>game/src/main.cpp</code> and <code>tools/package_game.py</code> build a self contained game folder</td></tr>
+          <tr><td>Scene saving</td><td><span class="badge done">Done</span></td><td><code>scene_saver.cpp</code> writes the same format back out (<code>--save-scene</code>)</td></tr>
+          <tr><td>Sandbox</td><td><span class="badge done">Done</span></td><td>Procedural demo, <code>--scene</code> loading, <code>--save-scene</code>, <code>--script</code> Python host, headless screenshots</td></tr>
+          <tr><td>Tests</td><td><span class="badge done">Done</span></td><td>63 assertions, <code>python build.py test</code></td></tr>
+          <tr><td>Python host</td><td><span class="badge done">Done</span></td><td>Embedded CPython 3.12 with a <code>bge</code> module: types, objects, controllers, handlers, timers, custom properties</td></tr>
+          <tr><td>Physics</td><td><span class="badge wip">In progress</span></td><td>Built-in rigid body solver (spheres, boxes, ground plane, impulses, sleeping); Jolt planned</td></tr>
+          <tr><td>Live Blender link</td><td><span class="badge plan">Planned</span></td><td>Streaming addon in M3</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Verified on this machine</h2>
+    <div class="grid cols-3">
+      <div class="card"><h3>OpenGL 4.6</h3><p>Context creation, vendor and version query verified via WGL on Intel UHD Graphics.</p></div>
+      <div class="card"><h3>Three build paths</h3><p><code>build.py</code> with Zig, CMake + Ninja, and a MinGW-w64 toolchain all compile the engine, sandbox and tests.</p></div>
+      <div class="card"><h3>Blender round trip</h3><p>Blender 4.4.3 exports a scene with sun, area, point and spot lights; the engine renders it headlessly and matches the Cycles reference.</p></div>
+      <div class="card"><h3>Scripting</h3><p>Embedded CPython 3.12 runs a script that animates the demo scene through the <code>bge</code> module.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Out of scope</h2>
+    <p style="color: var(--muted);">Freestyle line rendering, Grease Pencil, movie clips / sequencer and multi-view (stereo) rendering are deliberately not implemented.</p>
+  </section>
+
+  <section>
+    <h2>Known gaps</h2>
+    <ul style="color: var(--muted); font-size: 15px;">
+      <li>Environment maps are sampled with a lat-long mapping whose vertical axis is offset from Blender's <code>Generated</code> coordinates.</li>
+      <li>Only the first sun light casts shadows; point, spot and area lights are unshadowed.</li>
+      <li>Area lights widen roughness instead of using a rectangular-light integral (LTC).</li>
+      <li>AgX / Filmic colour management is approximated with an ACES curve; <code>Standard</code> is exact.</li>
+      <li>No EXR environment support, no audio, networking, UI, animation or asset cooking yet.</li>
+      <li>Physics and Python are not wired into the runtime yet.</li>
+      <li>No CI; this machine currently has no Git installation.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Environment</h2>
+    <div class="card">
+      <table>
+        <tbody>
+          <tr><th>OS</th><td>Windows 11 class host, 64-bit</td></tr>
+          <tr><th>GPU</th><td>Intel UHD Graphics (OpenGL 4.6)</td></tr>
+          <tr><th>Python</th><td>3.12.5 at <code>%LOCALAPPDATA%\Programs\Python\Python312</code></td></tr>
+          <tr><th>Compiler</th><td>Zig 0.14.1 (vendored, <code>.toolchain/zig</code>)</td></tr>
+          <tr><th>Blender</th><td>4.4.3 at <code>C:\Program Files\Blender Foundation\Blender 4.4</code></td></tr>
+          <tr><th>Also available</th><td>CMake 4.5, Ninja (via pip), MinGW GCC 6.3 (too old for C++20, unused)</td></tr>
+          <tr><th>Not installed</th><td>Git, MSVC C++ workload</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Next actions</h2>
+    <ol style="color: var(--muted); font-size: 15px;">
+      <li>Socket based live link with incremental mesh and material updates.</li>
+      <li>Replace the built-in solver with Jolt Physics (constraints, character control).</li>
+      <li>Import glTF assets and add a cooked pack format.</li>
+      <li>Fix the environment orientation, add prefiltered IBL and per-light shadow maps.</li>
+      <li>Add audio, gamepad input and a debug UI.</li>
+    </ol>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>BGE Revived · current state</span>
+    <span>Markdown source: <code>current_state.md</code></span>
+  </div>
+</footer>
+</body>
+</html>

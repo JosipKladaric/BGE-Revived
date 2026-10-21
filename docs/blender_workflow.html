@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Author in Blender, ship a game — BGE Revived</title>
+  <meta name="description" content="The BGE Revived workflow: export from Blender, play live in the engine, and package a distributable game.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="mark">B</span> BGE Revived</a>
+    <a class="link" href="index.html">Overview</a>
+    <a class="link" href="architecture.html">Architecture</a>
+    <a class="link" href="roadmap.html">Roadmap</a>
+    <a class="link" href="blender_integration.html">Blender</a>
+    <a class="link active" href="blender_workflow.html">Workflow</a>
+    <a class="link" href="current_state.html">Current state</a>
+    <a class="link" href="compatibility.html">Compatibility</a>
+    <span class="spacer"></span>
+    <span class="pill"><span class="dot"></span> M1 · Playable runtime</span>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="hero" style="padding-bottom: 14px;">
+    <div class="eyebrow">Authoring workflow</div>
+    <h1 style="font-size: clamp(34px, 5vw, 54px);">Make the game in Blender. Ship it from the engine.</h1>
+    <p class="lede">
+      The add-on turns Blender into the front end: export the scene, press Play to run it in the
+      BGE Revived runtime while you keep editing, and package a self contained game folder when
+      you are done.
+    </p>
+    <div class="status-line" style="margin-top: 24px;">
+      <span class="badge done">Working</span>
+      <span>Add-on, live link and packaging are implemented and verified</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>The loop</h2>
+    <div class="grid cols-4">
+      <div class="card"><h3>1. Author</h3><p>Model, light and script your scene in Blender as usual. The add-on reads the evaluated scene, so modifiers, curves and text are included.</p></div>
+      <div class="card"><h3>2. Export</h3><p><em>Export</em> writes <code>scene.bgescene</code>, a JSON manifest plus a packed binary buffer, with the textures next to it.</p></div>
+      <div class="card"><h3>3. Play</h3><p><em>Play</em> starts the engine on that scene. Every edit you make in Blender is re-exported and reloaded in place, so the running game follows the viewport.</p></div>
+      <div class="card"><h3>4. Package</h3><p><em>Package Game</em> assembles a folder with the runtime, the scene, the textures and the engine assets, plus an optional zip.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Installing the add-on</h2>
+    <div class="card">
+      <p>The add-on lives in <code>tools/blender_addon/bge_revival/</code>. Install it like any
+      Blender add-on:</p>
+      <pre><span class="c"># 1. build an installable zip of the add-on</span>
+python tools\make_addon_zip.py      <span class="c"># writes build/bge_revival.zip</span>
+
+<span class="c"># 2. Blender &gt; Preferences &gt; Add-ons &gt; Install from Disk... &gt; bge_revival.zip</span>
+<span class="c"># 3. enable "Game: BGE Revived"</span></pre>
+      <p>Then open the 3D View sidebar (<kbd>N</kbd>) and pick the <strong>BGE Revived</strong> tab.
+      In the add-on preferences, point <em>Engine folder</em> at the repository root (the folder
+      that contains <code>tools/bge_export.py</code>); everything else is optional.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What the add-on does</h2>
+    <div class="card" style="padding: 8px 22px;">
+      <table>
+        <thead><tr><th>Button</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Export Scene</strong></td><td>Writes <code>&lt;export folder&gt;/scene.bgescene</code> and copies the textures it references.</td></tr>
+          <tr><td><strong>Play</strong></td><td>Exports, then starts <code>bge_game.exe --scene ... --watch</code>. The engine polls the file and reloads the scene when it changes.</td></tr>
+          <tr><td><strong>Stop</strong></td><td>Closes the running engine.</td></tr>
+          <tr><td><strong>Package Game</strong></td><td>Exports and runs <code>tools/package_game.py</code> to build a distributable game folder (and a zip on request).</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>The packaged game</h2>
+    <pre>MyGame/
+├── MyGame.exe        the runtime, renamed after the game
+├── game.bgescene     the exported scene
+├── scene.bin         the packed vertex and index data
+├── textures/         the textures the scene references
+├── assets/           shaders and engine assets
+├── python312.dll     the embedded interpreter (only when scripting is used)
+└── README.txt</pre>
+    <p style="color: var(--muted);">The folder is self contained: copy it anywhere and run the
+    executable. The runtime loads <code>game.bgescene</code> next to itself, so a player never
+    needs Blender, Python or the source repository.</p>
+    <figure class="card">
+      <img src="images/packaged_game.png" alt="A packaged BGE Revived game running from its own folder" style="width:100%; border-radius:10px;">
+      <figcaption>A packaged game running from its own folder, with no Blender in sight.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>See the real engine output while you work</h2>
+    <p style="color: var(--muted);">The preview answers "will this look right in the game?". The
+    engine renders the scene with its own renderer - the same PBR shading, the same shadows, the
+    same tone mapping - and the frames come back to Blender.</p>
+    <div class="grid cols-3">
+      <div class="card"><h3>Start Preview</h3><p>The add-on exports the scene into a preview folder and starts the engine in preview mode: a hidden window that renders at the chosen resolution and writes each frame as <code>frame.png</code>.</p></div>
+      <div class="card"><h3>Back in Blender</h3><p>The add-on watches that file and mirrors the newest frame into a Blender image, shown in the image editor. It can also be drawn as a picture in picture in the corner of the 3D View.</p></div>
+      <div class="card"><h3>Always current</h3><p>Because the preview shares the live link, every edit is re-exported and re-rendered automatically. The measured round trip from a scene change to a new preview frame is about <strong>160 ms</strong> on this machine.</p></div>
+    </div>
+    <pre>Blender                        engine (preview mode)
+────────                        ─────────────────────
+edit the scene
+  │  re-export scene.bgescene
+  ├──────────────────────────▶  reload the scene
+                                render 960x540
+                                write frame.png
+  ◀──────────────────────────┤
+mirror the frame into the image editor</pre>
+    <div class="callout">
+      <strong>Why a file and not a socket?</strong> The first version ships the transport over
+      files because it cannot deadlock the editor, works across machines over a shared folder and
+      reuses the live link that is already proven. The cost is a PNG encode and decode per frame,
+      which is why the preview runs at 12 fps instead of 60. A socket transport with raw frames
+      (a few milliseconds of latency) is the planned upgrade; the add-on already isolates the
+      transport behind a single function.
+    </div>
+  </section>
+
+  <section>
+    <h2>How the live link works</h2>
+    <div class="card">
+      <p>The link is deliberately file based, so it works across machines and cannot deadlock the
+      editor:</p>
+      <ol style="color: var(--muted); font-size: 15px;">
+        <li>The add-on registers a depsgraph handler; any change to the scene marks it dirty.</li>
+        <li>A timer re-exports the scene when it is dirty and the engine is running.</li>
+        <li>The engine polls the manifest's modification time every 200 ms and reloads the scene in place when it changes.</li>
+        <li>Meshes, materials, lights, cameras and the world are rebuilt; the camera keeps framing the shot.</li>
+      </ol>
+      <p style="color: var(--muted);">A socket based push (and partial updates instead of a full
+      reload) is the planned next step; the interface in the add-on already isolates that
+      transport.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Scripting the exported game</h2>
+    <div class="card">
+      <p>A packaged game can carry a <code>startup.py</code> next to the scene. The runtime starts
+      it automatically, and objects can carry controllers with their own scripts.</p>
+      <pre><span class="c"># startup.py</span>
+import bge
+
+bge.app.handlers.post_update.append(update)
+
+def update():
+    knot = bge.objects.get("Knot")
+    if knot:
+        knot.applyRotation((0.0, 0.0, 1.0), bge._native.delta() * 0.8)</pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>Limits</h2>
+    <ul style="color: var(--muted); font-size: 15px;">
+      <li>The live link re-exports the whole scene; there is no incremental mesh update yet.</li>
+      <li>Each reload re-uploads the meshes, so the GPU resources of the previous scene are not reclaimed yet.</li>
+      <li>Only the active Blender scene is exported; collections and linked libraries are flattened first.</li>
+      <li>Animation, armatures and particles are not part of the export yet.</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>BGE Revived · authoring workflow</span>
+    <span>Add-on: <code>tools/blender_addon/bge_revival</code> · Packaging: <code>tools/package_game.py</code></span>
+  </div>
+</footer>
+</body>
+</html>

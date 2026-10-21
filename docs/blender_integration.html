@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blender integration — BGE Revived</title>
+  <meta name="description" content="How BGE Revived exports and imports real Blender scenes: lights, world environment, camera settings, materials and objects, with reference comparisons.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="mark">B</span> BGE Revived</a>
+    <a class="link" href="index.html">Overview</a>
+    <a class="link" href="architecture.html">Architecture</a>
+    <a class="link" href="roadmap.html">Roadmap</a>
+    <a class="link active" href="blender_integration.html">Blender</a>
+    <a class="link" href="blender_workflow.html">Workflow</a>
+    <a class="link" href="current_state.html">Current state</a>
+    <a class="link" href="compatibility.html">Compatibility</a>
+    <span class="spacer"></span>
+    <span class="pill"><span class="dot"></span> M1 · Playable runtime</span>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="hero" style="padding-bottom: 14px;">
+    <div class="eyebrow">Blender integration</div>
+    <h1 style="font-size: clamp(34px, 5vw, 54px);">Real <code>.blend</code> scenes, rendered by the engine.</h1>
+    <p class="lede">
+      BGE Revived does not embed Blender. Blender stays the authoring front-end; a file-based
+      exporter writes a compact scene description that the engine loads, so the same scene can be
+      rendered headlessly, on a server, or inside a game.
+    </p>
+    <div class="status-line" style="margin-top: 24px;">
+      <span class="badge done">Working</span>
+      <span>Export, import, render and compare against Cycles</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>The pipeline</h2>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>1. Export</h3>
+        <p><code>tools/bge_export.py</code> runs inside Blender and walks the evaluated depsgraph,
+        so modifiers, curves, text and surface objects are converted to real meshes. Object
+        transforms are baked into world space (Blender is Z-up, the engine is Y-up, and the
+        exporter converts positions, normals and light directions consistently).</p>
+        <p><code>blender --background scene.blend --python tools/bge_export.py -- --out build/scene</code></p>
+      </div>
+      <div class="card">
+        <h3>2. Scene format</h3>
+        <p>A JSON manifest plus one binary buffer: <code>scene.bgescene</code> holds materials,
+        meshes, objects, lights, cameras, world and render settings; <code>scene.bin</code> holds
+        packed vertices (position, normal, UV) and indices. Textures are copied next to the
+        manifest, HDR environments keep their original file.</p>
+      </div>
+      <div class="card">
+        <h3>3. Import</h3>
+        <p><code>engine/src/scene/scene_loader.cpp</code> parses the manifest with the engine's own
+        dependency-free JSON reader, uploads meshes and textures, creates entities for every
+        object, light and camera, and applies the world and render settings.</p>
+        <p><code>bge_sandbox --scene build/scene/scene.bgescene --headless --screenshot out.png</code></p>
+      </div>
+      <div class="card">
+        <h3>4. Compare</h3>
+        <p><code>tools/parity_check.py</code> runs the whole loop and prints a block-by-block
+        colour difference against a Cycles render, so visual regressions are measurable instead of
+        anecdotal.</p>
+        <p><code>python tools/parity_check.py --reference</code></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What is supported</h2>
+    <div class="card" style="padding: 8px 22px;">
+      <table>
+        <thead><tr><th>Blender feature</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Sun, point, spot and area lights</td><td><span class="badge done">Supported</span></td><td>Energy, colour, radius, spot cone and blend, range, rectangular area size, one-sided emission</td></tr>
+          <tr><td>World background colour and strength</td><td><span class="badge done">Supported</span></td><td>Flat sky and procedural gradient</td></tr>
+          <tr><td>World environment texture</td><td><span class="badge wip">Partial</span></td><td>Equirectangular LDR and Radiance <code>.hdr</code>; vertical orientation is offset from Blender</td></tr>
+          <tr><td>Camera</td><td><span class="badge done">Supported</span></td><td>Lens, sensor fit, field of view, near/far, orthographic scale, shift, active camera selection</td></tr>
+          <tr><td>Principled materials</td><td><span class="badge wip">Partial</span></td><td>Base colour, metallic, roughness, emission colour and strength, alpha; base colour and normal map textures</td></tr>
+          <tr><td>Objects</td><td><span class="badge done">Supported</span></td><td>Meshes, modifiers, curves, text, mirrored transforms, per-object shadow flags</td></tr>
+          <tr><td>Render settings</td><td><span class="badge wip">Partial</span></td><td>Exposure and Standard view transform are exact; AgX and Filmic are approximated</td></tr>
+          <tr><td>Animation, armatures, particles</td><td><span class="badge plan">Not yet</span></td><td>Planned for the M1/M2 milestones</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Reference comparison</h2>
+    <p style="color: var(--muted);">The test scene contains a ground plane, a blue cube, a gold
+    sphere, Suzanne, a pillar, an emissive ring, a textured cube and a text object, lit by one sun,
+    one area, one point and one spot light. Left: the engine. Right: Cycles in Blender.</p>
+    <div class="grid cols-2">
+      <figure class="card">
+        <img src="images/blender_engine.png" alt="BGE Revived render of the imported Blender scene" style="width:100%; border-radius:10px;">
+        <figcaption>BGE Revived, 1600x900, headless.</figcaption>
+      </figure>
+      <figure class="card">
+        <img src="images/blender_reference.png" alt="Cycles reference render of the same scene" style="width:100%; border-radius:10px;">
+        <figcaption>Blender 4.4.3 Cycles, same camera.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Environment lighting</h2>
+    <p style="color: var(--muted);">A second scene uses an equirectangular Radiance
+    <code>.hdr</code> world, a normal mapped cube and an alpha blended sphere. The engine
+    reproduces the environment split and the IBL response; the environment image is sampled with a
+    different vertical convention than Blender, which is the main visible difference.</p>
+    <div class="grid cols-2">
+      <figure class="card">
+        <img src="images/env_engine.png" alt="Engine render with an HDRI world" style="width:100%; border-radius:10px;">
+        <figcaption>BGE Revived with a <code>.hdr</code> environment.</figcaption>
+      </figure>
+      <figure class="card">
+        <img src="images/env_reference.png" alt="Cycles render with an HDRI world" style="width:100%; border-radius:10px;">
+        <figcaption>Blender Cycles with the same environment.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Limitations</h2>
+    <ul style="color: var(--muted); font-size: 15px;">
+      <li>The environment map is sampled with a lat-long mapping whose vertical axis is offset from Blender's world texture coordinates.</li>
+      <li>Only one directional light renders shadows; other light types are unshadowed.</li>
+      <li>Diffuse image-based lighting is an irradiance approximation rather than a prefiltered probe.</li>
+      <li>AgX and Filmic view transforms are approximated with an ACES curve.</li>
+      <li><code>.exr</code> environments are not supported; Radiance <code>.hdr</code> and LDR images are.</li>
+      <li>Normal maps rely on screen-space derivatives instead of imported tangents.</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>BGE Revived · Blender integration</span>
+    <span>Scripts: <code>tools/bge_export.py</code>, <code>tools/make_blender_test_scene.py</code>, <code>tools/parity_check.py</code></span>
+  </div>
+</footer>
+</body>
+</html>

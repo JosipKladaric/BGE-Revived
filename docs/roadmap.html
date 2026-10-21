@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roadmap — BGE Revived</title>
+  <meta name="description" content="Milestones for BGE Revived: foundation, playable runtime, content pipeline, Blender live link, tooling, and scale.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="mark">B</span> BGE Revived</a>
+    <a class="link" href="index.html">Overview</a>
+    <a class="link" href="architecture.html">Architecture</a>
+    <a class="link active" href="roadmap.html">Roadmap</a>
+    <a class="link" href="blender_integration.html">Blender</a>
+    <a class="link" href="blender_workflow.html">Workflow</a>
+    <a class="link" href="current_state.html">Current state</a>
+    <a class="link" href="compatibility.html">Compatibility</a>
+    <span class="spacer"></span>
+    <span class="pill"><span class="dot"></span> M0 · Foundation</span>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="hero" style="padding-bottom: 18px;">
+    <div class="eyebrow">Roadmap</div>
+    <h1 style="font-size: clamp(34px, 5vw, 54px);">From a verified foundation to a Blender-native runtime.</h1>
+    <p class="lede">
+      Each milestone ends with a runnable artifact and a measured result. The ordering is
+      deliberate: correctness and observability first, content and scale later.
+    </p>
+  </section>
+
+  <section>
+    <h2>Principles</h2>
+    <div class="grid cols-3">
+      <div class="card"><h3>Standalone first</h3><p>The runtime must run games without Blender installed. The bridge is an addon, never a runtime dependency.</p></div>
+      <div class="card"><h3>Simulation ≠ rendering</h3><p>Fixed-step gameplay, decoupled visual interpolation. Frame rate changes must not change behaviour.</p></div>
+      <div class="card"><h3>Prove it on screen</h3><p>Every rendering milestone is verified with a headless screenshot and a performance number, not just a successful compile.</p></div>
+      <div class="card"><h3>Profile before optimizing</h3><p>Built-in CPU/GPU timings and deterministic replay arrive before large-scale rendering work.</p></div>
+      <div class="card"><h3>Blender is the editor</h3><p>We will not rebuild Blender's editor. We will make the engine a first-class Blender target.</p></div>
+      <div class="card"><h3>Clean-room forever</h3><p>No copied BGE code, no accidental GPL contamination, documented third-party licenses.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Phases</h2>
+
+    <div class="phase">
+      <div class="tag">M0 · DONE</div>
+      <h3>Foundation</h3>
+      <p class="sub">A buildable engine skeleton and a verified, good-looking demo.</p>
+      <ul>
+        <li>Repository layout, design docs, zero-install Zig build (plus CMake)</li>
+        <li>Logging, math, ECS, job system, fixed timestep</li>
+        <li>Win32 window, OpenGL 4.6 context, input</li>
+        <li>HDR PBR renderer, directional shadows, instancing, post</li>
+        <li>Sandbox demo and headless screenshot</li>
+        <li>Unit tests (32 checks) and HTML documentation</li>
+      </ul>
+      <p style="margin-top: 12px; color: var(--muted); font-size: 14px;"><strong>Exit:</strong> <code>python build.py run</code> is stable, <code>python build.py test</code> passes, and the screenshot is reproducible. <strong>Met.</strong></p>
+    </div>
+
+    <div class="phase current">
+      <div class="tag">M1 · CURRENT</div>
+      <h3>Playable runtime</h3>
+      <ul>
+        <li>Blender scene export/import (<code>.bgescene</code>) with all light types, world, camera and materials</li>
+        <li>Runtime scene serialization: the engine writes and reads the same format</li>
+        <li>Embedded CPython host with a <code>bge</code> module (<code>bge.types</code>, <code>bge.objects</code>, <code>bge.app.handlers</code>)</li>
+        <li>Built-in rigid body solver as a Jolt stand-in</li>
+        <li>Prefabs, a cooked pack and a scene switching API</li>
+        <li>Jolt physics, character controller, collision events</li>
+        <li>Gamepad input, audio (miniaudio), debug UI</li>
+        <li>glTF, PNG/DDS, hot reload, runtime profiler</li>
+      </ul>
+      <p style="margin-top: 12px; color: var(--muted); font-size: 14px;"><strong>Exit:</strong> a walkable level with physics, Python gameplay, audio, and a saved scene.</p>
+    </div>
+
+    <div class="phase">
+      <div class="tag">SCOPE</div>
+      <h3>Not in scope</h3>
+      <ul>
+        <li>Freestyle line rendering</li>
+        <li>Grease Pencil</li>
+        <li>Movie clips and the sequencer</li>
+        <li>Multi-view (stereo) rendering</li>
+      </ul>
+    </div>
+
+    <div class="phase">
+      <div class="tag">M2</div>
+      <h3>Rendering and content pipeline</h3>
+      <ul>
+        <li>Cooked packs, dependency tracking, texture compression</li>
+        <li>Normal maps, decals, material variants</li>
+        <li>Cascaded shadows, clustered point/spot lights</li>
+        <li>SSAO, bloom, color grading, TAA/FXAA</li>
+        <li>Skeletal animation, blend trees, events</li>
+        <li>Particles and improved GPU instancing</li>
+      </ul>
+    </div>
+
+    <div class="phase">
+      <div class="tag">M3 · PARTIAL</div>
+      <h3>Blender live link</h3>
+      <ul>
+        <li>Blender add-on: export, play, stop and package from the 3D View sidebar</li>
+        <li>Live link: the engine reloads the scene in place when the scene file changes</li>
+        <li>Engine preview: the engine renders the scene and the frames are mirrored into Blender</li>
+        <li>Game template and packaging into a self contained game folder</li>
+        <li>Socket based push with incremental mesh, material and transform updates</li>
+        <li>Bidirectional selection and entity inspection</li>
+        <li>Bake lighting/occlusion back into engine data</li>
+      </ul>
+      <p style="margin-top: 12px; color: var(--muted); font-size: 14px;"><strong>Exit:</strong> the 2.49b workflow — edit in Blender, press Play, see the game — with no manual export step.</p>
+    </div>
+
+    <div class="phase">
+      <div class="tag">M4</div>
+      <h3>Tooling and shipping</h3>
+      <ul>
+        <li>Standalone inspector, outliner, profiler timeline</li>
+        <li>One-click package/export (executable + pack)</li>
+        <li>Crash reporting and deterministic replay</li>
+        <li>Validation layers and automated performance tests</li>
+      </ul>
+    </div>
+
+    <div class="phase">
+      <div class="tag">M5</div>
+      <h3>Scale and platforms</h3>
+      <ul>
+        <li>Vulkan RHI, render graph, bindless resources</li>
+        <li>Linux target and Steam Deck verification</li>
+        <li>GPU-driven culling and streaming worlds</li>
+        <li>Networking with snapshot/rollback-friendly APIs</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Legacy problems → replacements</h2>
+    <div class="card" style="padding: 8px 22px;">
+      <table>
+        <thead><tr><th>Problem</th><th>Replacement</th><th>Phase</th></tr></thead>
+        <tbody>
+          <tr><td>GPL-only codebase</td><td>Clean-room MIT/Apache-2.0 engine</td><td><span class="badge done">M0</span></td></tr>
+          <tr><td>Single-threaded runtime</td><td>Fork-join job system</td><td><span class="badge done">M0</span></td></tr>
+          <tr><td>Frame-rate-coupled logic</td><td>120 Hz fixed step + interpolation</td><td><span class="badge done">M0</span></td></tr>
+          <tr><td>Fixed-function renderer</td><td>OpenGL 4.6 PBR / RHI</td><td><span class="badge wip">M0</span></td></tr>
+          <tr><td>Old Bullet</td><td>Jolt Physics</td><td><span class="badge plan">M1</span></td></tr>
+          <tr><td>Blender-embedded editor</td><td>Standalone + live-link addon</td><td><span class="badge plan">M3</span></td></tr>
+          <tr><td>No asset pipeline</td><td>glTF import + cooked packs</td><td><span class="badge plan">M2</span></td></tr>
+          <tr><td>Weak tooling</td><td>Profiler, inspector, replay</td><td><span class="badge plan">M4</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>BGE Revived · roadmap</span>
+    <span>Markdown source: <code>roadmap.md</code></span>
+  </div>
+</footer>
+</body>
+</html>

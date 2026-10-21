@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Architecture — BGE Revived</title>
+  <meta name="description" content="Architecture of BGE Revived: platform layer, ECS, job system, renderer, physics, scripting, asset pipeline, and Blender live link.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site">
+  <nav class="nav">
+    <a class="brand" href="index.html"><span class="mark">B</span> BGE Revived</a>
+    <a class="link" href="index.html">Overview</a>
+    <a class="link active" href="architecture.html">Architecture</a>
+    <a class="link" href="roadmap.html">Roadmap</a>
+    <a class="link" href="blender_integration.html">Blender</a>
+    <a class="link" href="blender_workflow.html">Workflow</a>
+    <a class="link" href="current_state.html">Current state</a>
+    <a class="link" href="compatibility.html">Compatibility</a>
+    <span class="spacer"></span>
+    <span class="pill"><span class="dot"></span> M0 · Foundation</span>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="hero" style="padding-bottom: 18px;">
+    <div class="eyebrow">Architecture</div>
+    <h1 style="font-size: clamp(34px, 5vw, 54px);">A runtime built around data, time, and boundaries.</h1>
+    <p class="lede">
+      The engine is split so that rendering, simulation, scripting, and authoring can evolve
+      independently. Nothing in the hot path depends on Blender, on a specific windowing
+      system, or on the frame rate.
+    </p>
+  </section>
+
+  <div class="toc">
+    <a href="#layers">1. Layers and data flow</a>
+    <a href="#ecs">2. ECS and scene graph</a>
+    <a href="#time">3. Fixed timestep</a>
+    <a href="#jobs">4. Job system</a>
+    <a href="#render">5. Renderer</a>
+    <a href="#physics">6. Physics</a>
+    <a href="#scripting">7. Scripting</a>
+    <a href="#assets">8. Asset pipeline</a>
+    <a href="#blender">9. Blender live link</a>
+    <a href="#cleanroom">10. Clean-room policy</a>
+  </div>
+
+  <section id="layers">
+    <h2>1. Layers and data flow</h2>
+    <p class="sub">Dependencies point inward. The runtime never includes Blender headers; the bridge is a protocol, not a link-time dependency.</p>
+    <pre>┌───────────────────────────────────────────────────────────────┐
+│  Blender addon (authoring)          bge_sandbox / shipped game       │
+│  scene sync · asset export          runtime executable               │
+└──────────────┬───────────────────────────┬───────────────────┘
+                │ live-link protocol           │
+                ▼                              ▼
+┌─────────────────────────────────┐   ┌───────────────────────────────────┐
+│  bge_bridge (IPC, JSON/binary)│   │  Runtime                         │
+└───────────────────────────────────┘   │  fixed update · render · input   │
+                                    └───────────────┬──────────────┘
+                                                │
+        ┌────────────────────────────────────────────────────────────┐
+        ▼                                       ▼                              ▼
+┌───────────────┐                    ┌────────────────┐           ┌──────────────┐
+│  Scene / ECS   │                    │  Renderer / RHI  │           │ Script host    │
+│  transforms    │                    │  culling         │           │ CPython        │
+│  components    │                    │  passes          │           │ bge API        │
+└──────┬────────┘                    └──────────┬────────┘           └───────┬────────┘
+        │                                      │                             │
+        └─────────────┬───────────────────────────────────────────────┬──────────────┘
+                       ▼                                      ▼
+              ┌─────────────────┐                   ┌─────────────────┐
+              │  Job system      │                   │  Asset system    │
+              │  fork-join pool  │                   │  cooked packs    │
+              └─────────────────┘                   └─────────────────┘</pre>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>Static engine library</h3>
+        <p><code>bge_engine</code> contains platform, core, math, ECS, scene, renderer, asset, and script modules. A game links it and supplies its own <code>main</code> and content.</p>
+      </div>
+      <div class="card">
+        <h3>Thin executable</h3>
+        <p>The sandbox proves the engine as a consumer would use it: create window, load content, run the scene, render, shut down. No engine logic lives in <code>main</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="ecs">
+    <h2>2. ECS and scene graph</h2>
+    <p class="sub">Entities are stable handles; components are dense arrays; hierarchies are explicit components, not pointers hidden in objects.</p>
+    <pre><span class="k">struct</span> Entity { uint32_t index; uint32_t generation; };
+
+<span class="c">// One sparse-set pool per component type.</span>
+<span class="k">template</span> &lt;<span class="k">typename</span> T&gt; <span class="k">class</span> ComponentPool {
+    std::vector&lt;T&gt;        dense;     <span class="c">// packed component data</span>
+    std::vector&lt;uint32_t&gt; indices;   <span class="c">// entity index for each dense slot</span>
+    std::vector&lt;uint32_t&gt; sparse;    <span class="c">// entity index -&gt; dense slot</span>
+};
+
+<span class="c">// Iterate the smallest matching pool, then verify the rest.</span>
+world.each&lt;Transform, MeshRenderer&gt;([&amp;](Entity e, Transform&amp; t, MeshRenderer&amp; m) {
+    queue.push(e, t.world, m);
+});</pre>
+    <p class="sub" style="margin-top: 18px;">
+      <strong>Generational handles</strong> make stale references fail safely. <strong>Swap-remove</strong>
+      keeps iteration dense. <strong>Hierarchy</strong> is represented by <code>Parent</code> and
+      <code>Children</code> components; world matrices are recomputed from roots after local
+      transforms change. This avoids the pointer-heavy scene graph that made BGE object access
+      both slow and fragile.
+    </p>
+  </section>
+
+  <section id="time">
+    <h2>3. Fixed timestep</h2>
+    <p class="sub">The single most important behavioural fix over the original engine.</p>
+    <pre><span class="k">while</span> (accumulator &gt;= step) {
+    scene.fixed_update(step);   <span class="c">// 1/120 s, always</span>
+    accumulator -= step;
+}
+<span class="k">float</span> alpha = accumulator / step;
+renderer.render(scene, alpha);  <span class="c">// interpolate visual state</span></pre>
+    <p class="sub" style="margin-top: 18px;">
+      Scripts, gameplay, and physics never read the render delta. A 30 FPS frame and a 240 FPS
+      frame produce the same simulation. The accumulator is clamped after a stall so a
+      breakpoint or window drag cannot trigger a spiral of death.
+    </p>
+  </section>
+
+  <section id="jobs">
+    <h2>4. Job system</h2>
+    <p class="sub">A fork-join pool with a main-thread participant, designed for frame-scoped parallel work.</p>
+    <ul style="color: var(--muted); font-size: 15px;">
+      <li><code>parallel_for(begin, end, grain, fn)</code> splits work into chunks and lets the calling thread execute jobs too.</li>
+      <li>Thread count defaults to logical cores − 1 workers, plus the main thread.</li>
+      <li>Workers wait on a condition variable; the pool is created once and reused.</li>
+      <li>Planned: work stealing, job dependencies, and a separate asset IO queue.</li>
+    </ul>
+  </section>
+
+  <section id="render">
+    <h2>5. Renderer</h2>
+    <p class="sub">Forward PBR today, behind an RHI boundary that can grow a Vulkan backend without touching scene code.</p>
+    <pre>shadow pass ──▶ HDR scene pass ──▶ post pass ──▶ swapchain
+              ├─ sky gradient/sun
+              ├─ instanced opaque PBR
+              └─ (future) transparent, UI, debug lines</pre>
+    <div class="grid cols-3">
+      <div class="card"><h3>Batching</h3><p>Visible renderables sort by mesh + material, then draw with <code>glDrawElementsInstancedBaseInstance</code>. One instance buffer per frame.</p></div>
+      <div class="card"><h3>Culling</h3><p>Mesh bounds transformed to world space and tested against six frustum planes. Shadow casters are culled against the light frustum.</p></div>
+      <div class="card"><h3>Shading</h3><p>Cook-Torrance GGX, Smith visibility, Schlick Fresnel, sun / point / spot / area lights, environment ambient, PCF shadows, distance fog.</p></div>
+      <div class="card"><h3>HDR</h3><p>RGBA16F scene target, exposure, Standard (linear to sRGB) and ACES/AgX-approximation tone mapping, optional vignette and grade, FXAA in a fullscreen post pass.</p></div>
+      <div class="card"><h3>Textures</h3><p>stb_image decode, sRGB albedo upload, mipmaps, anisotropic filtering, Radiance <code>.hdr</code> environments in RGBA16F.</p></div>
+      <div class="card"><h3>Future</h3><p>Cascaded shadows, clustered lights, SSAO, bloom, TAA, GPU-driven culling, Vulkan RHI.</p></div>
+    </div>
+  </section>
+
+  <section id="blender">
+    <h2>5b. Blender scene bridge</h2>
+    <p class="sub">A file-based pipeline keeps Blender out of the runtime while letting real scenes drive the engine.</p>
+    <pre>Blender (Python)          engine
+tools/bge_export.py  ──▶  scene.bgescene  ──▶  scene_loader.cpp  ──▶  ECS + renderer
+                          scene.bin (verts, indices)
+                          textures/ (png, hdr)</pre>
+    <div class="grid cols-3">
+      <div class="card"><h3>Export</h3><p>The evaluated depsgraph is walked, so modifiers, curves and text become real meshes. Transforms are baked into world space and converted from Blender's Z-up to the engine's Y-up.</p></div>
+      <div class="card"><h3>Format</h3><p>JSON manifest plus a packed binary buffer, parsed by the engine's own dependency-free JSON reader. No third-party runtime dependencies.</p></div>
+      <div class="card"><h3>Verification</h3><p><code>tools/parity_check.py</code> renders the same scene in Cycles and in the engine and reports a block-by-block colour difference.</p></div>
+    </div>
+  </section>
+
+  <section id="physics">
+    <h2>6. Physics</h2>
+    <p class="sub">
+      The target is Jolt Physics: active, deterministic, multithreaded, and well-suited to a
+      modern character controller. Physics runs on the fixed step and writes transforms back
+      through the ECS. Interpolation state is kept separately so rendering stays smooth.
+    </p>
+    <div class="callout">
+      <strong>M0 note:</strong> physics is not wired yet. The sandbox uses kinematic demo motion
+      only. Jolt integration is the first task of M1, after the renderer and scripting host are
+      stable.
+    </div>
+  </section>
+
+  <section id="scripting">
+    <h2>7. Scripting</h2>
+    <p class="sub">Python is a gameplay language, not the engine's implementation language.</p>
+    <ul style="color: var(--muted); font-size: 15px;">
+      <li>CPython is embedded once per runtime; the GIL stays on the logic thread.</li>
+      <li>Entities are exposed as lightweight handles, not raw C++ pointers.</li>
+      <li>Hot paths (transforms, rendering, physics) stay native; scripts orchestrate.</li>
+      <li>The <code>bge</code> module is versioned and documented; a compatibility layer maps common 2.49b-era APIs where practical.</li>
+      <li>Script components declare <code>start</code>, <code>update(dt)</code>, and <code>stop</code> entry points.</li>
+    </ul>
+    <pre style="margin-top: 16px;">engine/src/script/python_host.cpp
+  ├─ native layer  (bge._native: find, location, rotation, scale, spawn, ...)
+  └─ Python layer  (bge.types, bge.objects, bge.logic.scene, bge.app.handlers)</pre>
+    <p class="sub" style="margin-top: 14px;">
+      The user facing API is written in Python on top of a thin C++ bridge, so new surface area
+      is added without touching the engine. Today the module covers vectors, object lookup,
+      transforms, visibility, scene spawning and per-frame handlers; controllers, logic bricks
+      and timers come next.
+    </p>
+    <p class="sub" style="margin-top: 14px;">The compatibility mapping is tracked in <a href="compatibility.html">Compatibility</a>.</p>
+  </section>
+
+  <section id="assets">
+    <h2>8. Asset pipeline</h2>
+    <pre>Blender / DCC ──▶ glTF + PNG ──▶ importer ──▶ validator ──▶ cooker ──▶ pack
+                                                              │
+                                             runtime loads ◀─┘</pre>
+    <p class="sub" style="margin-top: 16px;">
+      Source assets are never loaded by a shipped game. The cooker resolves dependencies,
+      converts textures, strips unused data, and emits a versioned pack. Hot reload is a
+      development-only path that watches source files and swaps resources live.
+    </p>
+  </section>
+
+  <section id="blender">
+    <h2>9. Blender live link</h2>
+    <p class="sub">
+      The old workflow's magic was the absence of an export step. We preserve that with a
+      persistent connection instead of embedding the engine inside Blender.
+    </p>
+    <ol style="color: var(--muted); font-size: 15px;">
+      <li>Blender addon starts or connects to the runtime over a local socket.</li>
+      <li>Scene graph, meshes, materials, and transforms are sent incrementally.</li>
+      <li>Press Play in Blender: addon switches the runtime into play mode and mirrors input/state.</li>
+      <li>Selecting an entity in Blender highlights it in the runtime and vice versa.</li>
+      <li>Bake lighting, occlusion, and navigation data back into the cooked scene.</li>
+    </ol>
+  </section>
+
+  <section id="cleanroom">
+    <h2>10. Clean-room policy</h2>
+    <div class="callout">
+      <strong>We do not copy the original BGE source.</strong> Behaviour and public API names may
+      be studied for compatibility, but implementation is written from specifications and
+      original code. Dependencies are vendored with their licenses recorded. This keeps the
+      engine free to use a permissive license and avoids inheriting GPL obligations.
+    </div>
+    <p class="sub">
+      Third-party code currently vendored: glad (MIT), stb_image / stb_image_write (public
+      domain / MIT). Each dependency's license is stored alongside it.
+    </p>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>BGE Revived · architecture</span>
+    <span><a href="current_state.html">Current state</a> · <a href="roadmap.html">Roadmap</a></span>
+  </div>
+</footer>
+</body>
+</html>
