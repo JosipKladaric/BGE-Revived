@@ -1,6 +1,6 @@
 # BGE Revived — Roadmap
 
-> Last updated: 2026-10-21
+> Last updated: 2026-10-22
 >
 > The goal is a standalone, modern, clean-room recreation of the Blender Game Engine (BGE),
 > later connected to modern Blender as the authoring front-end. We are not porting the old
@@ -66,10 +66,13 @@ headless screenshots match the documented reference.
       `bge.app.handlers`) and a scripted demo
 - [x] Runtime scene serialization: the `.bgescene` format is written and read by the engine
 - [x] Built-in rigid body solver (spheres, boxes, ground plane, impulses) as a Jolt stand-in
+- [x] Jolt Physics 5.3.0 vendored with `tools/fetch_jolt.py`; the runtime picks it over the
+      built-in solver and both build paths link it
+- [x] Blender rigid body objects exported as `physics` blocks and simulated by the engine
 - [ ] Prefabs and a runtime asset pack
 - [ ] Wider scripting API: logic bricks, timers, custom properties, scene switching
 - [ ] Gamepad input, audio (miniaudio), simple UI
-- [ ] Jolt physics: rigid bodies, character controller, collision events
+- [ ] Jolt follow-up: capsule/convex shapes, character controller, collision events
 - [ ] Runtime profiler overlay and remote console
 - [ ] Asset import: glTF meshes/materials, PNG/DDS textures, hot reload
 
@@ -92,13 +95,21 @@ movie clips / sequencer and multi-view (stereo) rendering are not part of this e
 
 ### M3 - Blender live link (partially done)
 
-The file based bridge is working; what is missing is the incremental, socket based version.
+The socket based bridge is working and the frame pixels now bypass the socket through shared
+memory. What is left is authoring feedback: lights and cameras in the incremental path, selection
+round trips and baked lighting.
 
 - [x] Blender add-on: export, play, stop and package from the 3D View sidebar
+- [x] Blender render engine: "BGE Revived" next to Cycles and EEVEE, rendering with the game engine
+- [x] Socket transport: the engine serves scenes and frames over a local TCP port
+- [x] Shared memory frames: the pixels travel through a named region, so the socket only carries
+      small messages and the preview never waits for a round trip
+- [x] Incremental live link: only the changed objects, transforms and geometry are transferred
+- [x] Viewport preview: the rendered frame is drawn over the camera frame in the 3D View
 - [x] Live link: the engine reloads the scene in place when the scene file changes
 - [x] Engine preview: the engine renders the scene and the frames are mirrored into Blender
 - [x] Game template and packaging: a self contained game folder (and zip)
-- [ ] Socket based push with incremental mesh, material and transform updates
+- [ ] Incremental updates for lights and cameras too
 - [ ] Selection and entity inspection in Blender
 - [ ] Bake lighting/occlusion back into the engine
 

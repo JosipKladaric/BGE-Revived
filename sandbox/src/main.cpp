@@ -3,6 +3,7 @@
 #include "bge/core/log.h"
 #include "bge/core/time.h"
 #include "bge/ecs/components.h"
+#include "bge/physics/physics_backend.h"
 #include "bge/physics/physics_binding.h"
 #include "bge/physics/physics_world.h"
 #include "bge/platform/window.h"
@@ -38,6 +39,7 @@ struct Options {
     std::string save_scene;
     std::string script;
     bool physics = false;
+    bool builtin_physics = false;
     bool watch = false;
     bool vsync = true;
     bool free_camera = false;
@@ -64,6 +66,7 @@ static Options parse_args(int argc, char** argv) {
         else if (a == "--save-scene") o.save_scene = next("--save-scene");
         else if (a == "--script") o.script = next("--script");
         else if (a == "--physics") o.physics = true;
+        else if (a == "--builtin-physics") o.builtin_physics = true;
         else if (a == "--watch") o.watch = true;
         else if (a == "--free-camera") o.free_camera = true;
         else if (a == "--no-vsync") o.vsync = false;
@@ -186,7 +189,15 @@ static void build_physics_scene(Scene& scene, Renderer& renderer) {
     MeshHandle cube = renderer.create_mesh(make_cube(1.0f));
     MeshHandle sphere = renderer.create_mesh(make_sphere(1.0f, 48, 32));
 
-    scene.create_mesh_entity("Ground", plane, ground_material);
+    Entity ground = scene.create_mesh_entity("Ground", plane, ground_material);
+    {
+        // A static floor body: Jolt has no implicit ground plane, so the demo
+        // needs something for the pile to land on.
+        RigidBody floor_body;
+        floor_body.is_static = true;
+        floor_body.half_extents = {60.0f, 0.1f, 60.0f};
+        scene.world().add(ground, floor_body);
+    }
 
     // A loose grid of boxes that topples into a pile.
     for (int i = 0; i < 9; ++i) {
@@ -468,11 +479,13 @@ int main(int argc, char** argv) {
     }
 
     // Physics: create a body for every rigid body in the scene and step the
-    // simulation on the fixed timestep.
-    PhysicsWorld physics;
-    create_physics_bodies(scene, physics);
-    if (physics.body_count() > 0) {
-        BGE_INFO("Physics: %zu bodies, gravity %.2f m/s^2", physics.body_count(), physics.gravity().y);
+    // simulation on the fixed timestep. Jolt is used when it was built in.
+    std::unique_ptr<PhysicsBackend> physics = create_physics_backend(!opt.builtin_physics);
+    if (!physics) physics = std::make_unique<PhysicsWorld>();
+    BGE_INFO("Physics: %s backend", physics->name());
+    create_physics_bodies(scene, *physics);
+    if (physics->body_count() > 0) {
+        BGE_INFO("Physics: %zu bodies, gravity %.2f m/s^2", physics->body_count(), -9.81f);
     }
 
     OrbitCamera orbit;
@@ -537,9 +550,9 @@ int main(int argc, char** argv) {
         fixed.consume(dt, [&](double step) {
             simulated += step;
             scene.fixed_update(static_cast<float>(step));
-            if (physics.body_count() > 0) {
-                physics.step(static_cast<float>(step));
-                sync_physics_transforms(scene, physics);
+            if (physics->body_count() > 0) {
+                physics->step(static_cast<float>(step));
+                sync_physics_transforms(scene, *physics);
             }
         });
 
@@ -558,7 +571,7 @@ int main(int argc, char** argv) {
                     if (load_bge_scene(scene, renderer, opt.scene, &error)) {
                         scene.update_transforms();
                         if (use_scene_camera) scene.apply_camera_component();
-                        create_physics_bodies(scene, physics);
+                        create_physics_bodies(scene, *physics);
                         BGE_INFO("Live link: reloaded '%s'", opt.scene.c_str());
                     } else {
                         BGE_ERROR("Live link: reload failed: %s", error.c_str());

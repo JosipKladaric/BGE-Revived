@@ -36,6 +36,9 @@ public:
     int width() const { return width_; }
     int height() const { return height_; }
 
+    // Follows a window resize.
+    void set_size(int width, int height);
+
     // The most recent frame as raw RGBA bytes (bottom-up), for the network
     // preview server.
     const std::vector<uint8_t>& pixels() const { return pixels_; }

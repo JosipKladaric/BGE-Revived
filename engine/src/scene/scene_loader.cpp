@@ -340,6 +340,21 @@ bool load_bge_scene_data(Scene& scene, Renderer& renderer, const std::string& te
         decompose_trs(world, t->position, t->rotation, t->scale);
         MeshRenderer* r = scene.world().get<MeshRenderer>(e);
         if (r) r->cast_shadow = json_bool(o, "cast_shadow", true);
+
+        // Optional rigid body description written by the Blender exporter.
+        const Json& physics = o["physics"];
+        if (physics.is_object()) {
+            RigidBody rigid;
+            rigid.is_static = json_bool(physics, "static", false);
+            rigid.sphere = json_string(physics, "shape", "box") == "sphere";
+            rigid.mass = static_cast<float>(json_float(physics, "mass", 1.0));
+            rigid.restitution = static_cast<float>(json_float(physics, "restitution", 0.15));
+            rigid.friction = static_cast<float>(json_float(physics, "friction", 0.5));
+            rigid.radius = static_cast<float>(json_float(physics, "radius", 0.5));
+            rigid.half_extents = json_vec3(physics["half_extents"], {0.5f, 0.5f, 0.5f});
+            // Keep the transform we just read: the body starts where Blender put it.
+            scene.world().add(e, rigid);
+        }
         ++imported_objects;
     }
 
@@ -364,6 +379,32 @@ bool load_bge_scene_data(Scene& scene, Renderer& renderer, const std::string& te
         }
     }
 
+    // Sampled animations are attached to the objects they belong to.
+    const Json& animation_array = root["animations"];
+    size_t animation_count = 0;
+    for (const Json& track : animation_array.as_array()) {
+        const std::string name = json_string(track, "name");
+        Entity e = scene.find(name);
+        if (!e) continue;
+        Animation animation;
+        animation.fps = static_cast<float>(json_float(track, "fps", 30.0));
+        animation.start_time = static_cast<float>(json_float(track, "start_time", 0.0));
+        const Json& times = track["times"];
+        const Json& matrices = track["matrices"];
+        const size_t count = times.as_array().size();
+        for (size_t i = 0; i < count; ++i) {
+            animation.times.push_back(static_cast<float>(times.at(i).as_float()));
+            std::array<float, 16> matrix{};
+            for (size_t k = 0; k < 16; ++k) {
+                matrix[k] = static_cast<float>(matrices.at(i * 16 + k).as_float());
+            }
+            animation.matrices.push_back(matrix);
+        }
+        if (animation.times.empty()) continue;
+        scene.world().add(e, std::move(animation));
+        ++animation_count;
+    }
+
     if (root["render"].is_object()) {
         float ev = json_float(root["render"], "exposure", 0.0f);
         scene.exposure = std::pow(2.0f, ev);
@@ -378,9 +419,9 @@ bool load_bge_scene_data(Scene& scene, Renderer& renderer, const std::string& te
     scene.update_transforms();
     scene.apply_camera_component();
 
-    BGE_INFO("Imported Blender scene '%s': %zu objects, %zu meshes, %zu materials, %zu lights, %zu cameras",
+    BGE_INFO("Imported Blender scene '%s': %zu objects, %zu meshes, %zu materials, %zu lights, %zu cameras, %zu animations",
              scene.name.c_str(), imported_objects, meshes.size(), materials.size(),
-             light_array.as_array().size(), camera_array.as_array().size());
+             light_array.as_array().size(), camera_array.as_array().size(), animation_count);
     return true;
 }
 

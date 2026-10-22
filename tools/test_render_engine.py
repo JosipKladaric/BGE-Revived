@@ -31,7 +31,12 @@ bpy.ops.mesh.primitive_cube_add(size=2.0, location=(0.0, 0.0, 1.0))
 bpy.ops.mesh.primitive_uv_sphere_add(radius=1.0, location=(3.0, 0.0, 1.0))
 bpy.ops.object.light_add(type="SUN", location=(4.0, -4.0, 8.0))
 bpy.ops.object.camera_add(location=(7.0, -7.0, 5.0))
-bpy.context.scene.camera = bpy.context.scene.objects[-1]
+camera = bpy.context.scene.objects[-1]
+from mathutils import Vector
+
+direction = Vector((0.0, 0.0, 1.0)) - camera.location
+camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+bpy.context.scene.camera = camera
 
 scene = bpy.context.scene
 scene.render.engine = "BGE_REVIVED"
@@ -48,4 +53,9 @@ print("[TEST] render result:", result)
 image = OUTPUT / "bge_render.png"
 print("[TEST] output:", image, image.is_file(), image.stat().st_size if image.is_file() else 0)
 assert image.is_file(), "the render engine did not produce an image"
+
+render_image = bpy.data.images.get("BGE Render")
+if render_image:
+    pixels = list(render_image.pixels[:8])
+    print("[TEST] BGE Render pixels:", pixels, "size:", tuple(render_image.size))
 print("[TEST] OK")

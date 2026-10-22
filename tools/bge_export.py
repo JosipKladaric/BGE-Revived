@@ -236,8 +236,13 @@ def material_record(material, out_dir: Path, args, image_cache: dict, material_i
     return index
 
 
-def mesh_primitives(obj, depsgraph, args, material_index, material_records, out_dir, image_cache):
-    """Return (primitives, matrix_identity). Primitives are already in world space."""
+def mesh_primitives(obj, depsgraph, args, material_index, material_records, out_dir, image_cache,
+                    local_space=False):
+    """Return (primitives, matrix_identity). Primitives are already in world space.
+
+    With `local_space` the geometry keeps the object's own transform, so the
+    engine can move the object later with a cheap transform update.
+    """
     if obj.type not in {"MESH", "CURVE", "SURFACE", "META", "FONT"}:
         return []
 
@@ -255,7 +260,9 @@ def mesh_primitives(obj, depsgraph, args, material_index, material_records, out_
         if not mesh.loop_triangles:
             return []
 
-        world = obj.matrix_world.copy()
+        # In local space the geometry keeps the raw mesh vertices; the engine
+        # applies the world matrix it receives with the object.
+        world = Matrix.Identity(4) if local_space else obj.matrix_world.copy()
         normal_mat = world.to_3x3().inverted_safe().transposed()
         mirrored = world.to_3x3().determinant() < 0.0
 
@@ -311,6 +318,30 @@ def mesh_primitives(obj, depsgraph, args, material_index, material_records, out_
         return primitives
     finally:
         evaluated.to_mesh_clear()
+
+
+def rigid_body_record(obj) -> dict | None:
+    """Describes a Blender rigid body for the runtime physics world.
+
+    Blender keeps the rigid body settings on the object, so an object with
+    ``obj.rigid_body`` becomes a body in the engine as well. The bounds come
+    from the object dimensions, which include its scale.
+    """
+    body = getattr(obj, "rigid_body", None)
+    if body is None:
+        return None
+    dimensions = [max(float(d), 0.002) for d in obj.dimensions]
+    half_extents = [d * 0.5 for d in dimensions]
+    shape = "sphere" if body.collision_shape == "SPHERE" else "box"
+    return {
+        "shape": shape,
+        "static": body.type == "PASSIVE",
+        "mass": max(float(body.mass), 0.001),
+        "friction": float(body.friction),
+        "restitution": float(body.restitution),
+        "half_extents": half_extents,
+        "radius": max(half_extents),
+    }
 
 
 def light_record(obj) -> dict | None:
@@ -477,7 +508,8 @@ def export_scene(scene, out, args) -> Path:
     for obj in objects:
         primitives = mesh_primitives(obj, depsgraph, args, material_index, material_records,
                                      texture_dir, image_cache)
-        for prim in primitives:
+        physics = rigid_body_record(obj)
+        for prim_index, prim in enumerate(primitives):
             vertex_offset = len(buffer)
             for v in prim["vertices"]:
                 buffer.extend(struct.pack("<8f", *v))
@@ -493,16 +525,18 @@ def export_scene(scene, out, args) -> Path:
                     "index_count": len(prim["indices"]),
                 }
             )
-            object_records.append(
-                {
-                    "name": prim["name"],
-                    "mesh": len(mesh_records) - 1,
-                    "material": prim["material"],
-                    "matrix": mat_to_list(Matrix.Identity(4)),
-                    "visible": True,
-                    "cast_shadow": bool(getattr(obj, "visible_shadow", True)),
-                }
-            )
+            record = {
+                "name": prim["name"],
+                "mesh": len(mesh_records) - 1,
+                "material": prim["material"],
+                "matrix": mat_to_list(Matrix.Identity(4)),
+                "visible": True,
+                "cast_shadow": bool(getattr(obj, "visible_shadow", True)),
+            }
+            # One body per object, not per material primitive.
+            if physics is not None and prim_index == 0:
+                record["physics"] = physics
+            object_records.append(record)
 
     lights = [r for obj in objects if obj.type == "LIGHT" and (r := light_record(obj)) is not None]
     active_camera = scene.camera.name if scene.camera else None
@@ -513,6 +547,7 @@ def export_scene(scene, out, args) -> Path:
     ]
 
     world = world_record(scene, texture_dir, args, image_cache)
+    animations = animation_tracks(scene, objects)
     render = {
         "resolution_x": int(scene.render.resolution_x * scene.render.resolution_percentage / 100),
         "resolution_y": int(scene.render.resolution_y * scene.render.resolution_percentage / 100),
@@ -535,6 +570,7 @@ def export_scene(scene, out, args) -> Path:
         "active_camera": active_camera,
         "world": world,
         "render": render,
+        "animations": animations,
         "materials": material_records,
         "meshes": mesh_records,
         "objects": object_records,
@@ -549,6 +585,43 @@ def export_scene(scene, out, args) -> Path:
         f"{len(cameras)} cameras, {len(buffer) / 1024 / 1024:.2f} MiB)"
     )
     return out
+
+
+def animation_tracks(scene, objects):
+    """Samples the transform animation of every animated object.
+
+    Blender's action system is evaluated here, so the runtime receives plain
+    world matrices sampled at a fixed rate and interpolates them itself.
+    """
+    tracks = []
+    start = scene.frame_start
+    end = scene.frame_end
+    if end < start:
+        return tracks
+    fps = scene.render.fps / max(scene.render.fps_base, 1e-6)
+    current = scene.frame_current
+
+    for obj in objects:
+        animation_data = getattr(obj, "animation_data", None)
+        if animation_data is None or animation_data.action is None:
+            continue
+        matrices = []
+        for frame in range(start, end + 1):
+            scene.frame_set(frame)
+            matrices.append(mat_to_list(conv_matrix(obj.matrix_world)))
+        scene.frame_set(current)
+        if not matrices or matrices[0] == matrices[-1]:
+            # The object never moved: no track needed.
+            continue
+        times = [(frame - start) / fps for frame in range(start, end + 1)]
+        tracks.append({
+            "name": obj.name,
+            "fps": fps,
+            "start_time": 0.0,
+            "times": times,
+            "matrices": [value for matrix in matrices for value in matrix],
+        })
+    return tracks
 
 
 def main() -> int:

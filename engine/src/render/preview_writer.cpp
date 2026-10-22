@@ -51,6 +51,11 @@ bool PreviewWriter::should_write(double now_seconds) const {
     return (now_seconds - last_write_) >= (1.0 / max_fps_);
 }
 
+void PreviewWriter::set_size(int width, int height) {
+    width_ = std::max(width, 1);
+    height_ = std::max(height, 1);
+}
+
 void PreviewWriter::capture() {
     if (width_ <= 0 || height_ <= 0) return;
 

@@ -1,0 +1,33 @@
+# Build output
+build/
+*.o
+*.obj
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.lib
+*.a
+
+# Vendored toolchain: downloaded, not source
+.toolchain/
+
+# Optional dependency fetched with tools/fetch_jolt.py
+engine/third_party/jolt/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local notes, logs and one-off captures
+*.log
+/screenshot.png
+*.blend1
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini

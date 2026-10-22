@@ -80,6 +80,16 @@ python tools\make_addon_zip.py      <span class="c"># writes build/bge_revival.z
   </section>
 
   <section>
+    <h2>Physics from Blender</h2>
+    <div class="grid cols-3">
+      <div class="card"><h3>Rigid body objects</h3><p>Add a rigid body in Blender (<em>Physics ▸ Rigid Body</em>). Active bodies fall and tumble; passive bodies stay where they are and act as floors and walls.</p></div>
+      <div class="card"><h3>What is exported</h3><p>Shape (box or sphere), mass, friction, restitution and the object bounds. The body starts at the object's world transform.</p></div>
+      <div class="card"><h3>What simulates</h3><p>Jolt Physics 5.3.0 steps the bodies on the fixed timestep in the game runtime; the renderer interpolates the transforms.</p></div>
+    </div>
+    <p style="color: var(--muted); font-size: 15px; margin-top: 12px;">Capsule, convex hull and mesh collision shapes are exported as an enclosing box for now, so blocks and spheres give the most predictable results.</p>
+  </section>
+
+  <section>
     <h2>The packaged game</h2>
     <pre>MyGame/
 ├── MyGame.exe        the runtime, renamed after the game
@@ -99,14 +109,35 @@ python tools\make_addon_zip.py      <span class="c"># writes build/bge_revival.z
   </section>
 
   <section>
+    <h2>BGE Revived as a render engine</h2>
+    <p style="color: var(--muted);">The add-on registers a render engine with Blender, so
+    <strong>BGE Revived</strong> appears next to Cycles and EEVEE in the render properties. Select
+    it, press F12, and the scene is rendered by the game engine: the same PBR shading, the same
+    shadow map, the same tone mapping. The result is written to the output path and shown in the
+    image editor.</p>
+    <div class="card">
+      <pre>Render properties  ▸  Render engine  ▸  BGE Revived     <span class="c"># then F12</span></pre>
+      <p style="color: var(--muted);">The engine renders at Blender's render resolution and with
+      Blender's active camera, so the F12 image is the frame the game shows. The frame is read
+      from a named shared memory region, so the resolution is exact and the pixels are not copied
+      through the socket.</p>
+    </div>
+    <div class="callout">
+      <strong>One Blender limitation.</strong> Blender does not expose its render result buffer to
+      Python render engines, so the F12 window itself stays empty and the add-on writes the image
+      to the output path (and shows it in the image editor) instead.
+    </div>
+  </section>
+
+  <section>
     <h2>See the real engine output while you work</h2>
     <p style="color: var(--muted);">The preview answers "will this look right in the game?". The
     engine renders the scene with its own renderer - the same PBR shading, the same shadows, the
     same tone mapping - and the frames come back to Blender.</p>
     <div class="grid cols-3">
-      <div class="card"><h3>Start Preview</h3><p>The add-on exports the scene into a preview folder and starts the engine in preview mode: a hidden window that renders at the chosen resolution and writes each frame as <code>frame.png</code>.</p></div>
-      <div class="card"><h3>Back in Blender</h3><p>The add-on watches that file and mirrors the newest frame into a Blender image, shown in the image editor. It can also be drawn as a picture in picture in the corner of the 3D View.</p></div>
-      <div class="card"><h3>Always current</h3><p>Because the preview shares the live link, every edit is re-exported and re-rendered automatically. The measured round trip from a scene change to a new preview frame is about <strong>160 ms</strong> on this machine.</p></div>
+      <div class="card"><h3>Start Preview</h3><p>The add-on exports the scene into a preview folder and starts the engine in preview mode: a hidden window that renders at the chosen resolution and publishes each frame into a named shared memory region.</p></div>
+      <div class="card"><h3>Back in Blender</h3><p>The frames are mirrored into a Blender image, shown in the image editor, and drawn over the camera frame in the 3D View (or in the corner).</p></div>
+      <div class="card"><h3>Always current</h3><p>Because the preview shares the live link, every edit is re-exported and re-rendered automatically. The add-on reads whatever the engine published last instead of waiting for a round trip, so the delay is one timer tick (50 ms) plus the engine's frame time.</p></div>
     </div>
     <pre>Blender                        engine (preview mode)
 ────────                        ─────────────────────
@@ -118,29 +149,51 @@ edit the scene
   ◀──────────────────────────┤
 mirror the frame into the image editor</pre>
     <div class="callout">
-      <strong>Why a file and not a socket?</strong> The first version ships the transport over
-      files because it cannot deadlock the editor, works across machines over a shared folder and
-      reuses the live link that is already proven. The cost is a PNG encode and decode per frame,
-      which is why the preview runs at 12 fps instead of 60. A socket transport with raw frames
-      (a few milliseconds of latency) is the planned upgrade; the add-on already isolates the
-      transport behind a single function.
+      <strong>How the frames come back.</strong> The engine runs a small local TCP server
+      (<code>--preview-port</code>) for scenes, commands and short replies. The pixels do not go
+      through it: the engine publishes each frame into a named shared memory region and the add-on
+      reads the newest complete frame from there, so nothing is copied over a socket. A file based
+      transport (a watched <code>frame.png</code>) is kept as the fallback for setups where neither
+      is available.
     </div>
+  </section>
+
+  <section>
+    <h2>Incremental updates</h2>
+    <p style="color: var(--muted);">A full re-export on every keystroke would be wasteful, so the
+    live link sends only what changed. The add-on watches the objects Blender reports as updated
+    and pushes the smallest possible update:</p>
+    <div class="card" style="padding: 8px 22px;">
+      <table>
+        <thead><tr><th>Change in Blender</th><th>What is transferred</th></tr></thead>
+        <tbody>
+          <tr><td>An object was moved or rotated</td><td>A 16 float matrix and the object name</td></tr>
+          <tr><td>A mesh was edited</td><td>Only that mesh's vertices and indices; the engine uploads it and rebinds the object</td></tr>
+          <tr><td>An object was added or removed</td><td>The name, and the mesh that goes with it</td></tr>
+          <tr><td>A light or camera changed</td><td>A full re-export (lights and cameras are cheap to re-read)</td></tr>
+          <tr><td>Keyframes changed</td><td>The animation is re-sampled on the next full export</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="color: var(--muted);">The engine applies the update to the running scene: the
+    transform is decomposed into position, rotation and scale, and a new mesh replaces the old
+    GPU buffer in place. Nothing is rebuilt that did not change.</p>
   </section>
 
   <section>
     <h2>How the live link works</h2>
     <div class="card">
-      <p>The link is deliberately file based, so it works across machines and cannot deadlock the
-      editor:</p>
+      <p>Scene updates go over a socket; frames come back through shared memory. The file watch is
+      kept as a fallback, so the link still works across machines and cannot deadlock the editor:</p>
       <ol style="color: var(--muted); font-size: 15px;">
         <li>The add-on registers a depsgraph handler; any change to the scene marks it dirty.</li>
-        <li>A timer re-exports the scene when it is dirty and the engine is running.</li>
-        <li>The engine polls the manifest's modification time every 200 ms and reloads the scene in place when it changes.</li>
-        <li>Meshes, materials, lights, cameras and the world are rebuilt; the camera keeps framing the shot.</li>
+        <li>A timer pushes only what changed over the socket (or re-exports the whole scene when the change is not incremental).</li>
+        <li>The engine applies the update to the running scene and keeps rendering.</li>
+        <li>With <code>--watch</code>, the engine also polls the manifest's modification time every 200 ms and reloads the scene in place when it changes.</li>
       </ol>
-      <p style="color: var(--muted);">A socket based push (and partial updates instead of a full
-      reload) is the planned next step; the interface in the add-on already isolates that
-      transport.</p>
+      <p style="color: var(--muted);">The engine publishes every rendered frame into the shared
+      region with a seqlock, so the add-on can take the newest frame at any moment and never sees a
+      half written one.</p>
     </div>
   </section>
 
@@ -164,10 +217,10 @@ def update():
   <section>
     <h2>Limits</h2>
     <ul style="color: var(--muted); font-size: 15px;">
-      <li>The live link re-exports the whole scene; there is no incremental mesh update yet.</li>
+      <li>The live link re-exports the changed parts of the scene; transforms and edited meshes are pushed incrementally.</li>
       <li>Each reload re-uploads the meshes, so the GPU resources of the previous scene are not reclaimed yet.</li>
       <li>Only the active Blender scene is exported; collections and linked libraries are flattened first.</li>
-      <li>Animation, armatures and particles are not part of the export yet.</li>
+      <li>Armatures, shape keys and particles are not part of the export yet; object transform animation is sampled.</li>
     </ul>
   </section>
 </main>

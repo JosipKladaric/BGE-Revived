@@ -113,12 +113,16 @@
     <p class="sub">
       The current build is intentionally dependency-light. On this machine the engine is built
       with a vendored Zig toolchain, so no Visual Studio, CMake, or package manager is required.
+      The one optional download is Jolt Physics, fetched once with <code>python tools/fetch_jolt.py</code>;
+      without it the engine builds with its small built-in solver instead.
     </p>
     <pre><span class="c"># from the repository root</span>
 python build.py            <span class="c"># build engine + sandbox</span>
 python build.py run        <span class="c"># build and launch the demo</span>
-python build.py test       <span class="c"># run math / ECS / job / script tests</span>
+python build.py test       <span class="c"># run math / ECS / job / physics / script tests</span>
 python build.py --compiler mingw   <span class="c"># build with MinGW-w64 instead of Zig</span>
+python build.py --no-jolt          <span class="c"># build with the built-in physics solver</span>
+python tools/fetch_jolt.py         <span class="c"># optional: Jolt Physics 5.3.0 for real rigid bodies</span>
 
 <span class="c"># optional: the same build through CMake and Ninja</span>
 cmake -S . -B build/cmake -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/zig-windows.cmake
@@ -132,8 +136,9 @@ build\bin\bge_sandbox.exe --scene build\scene\scene.bgescene --headless --screen
 build\bin\bge_sandbox.exe --script assets\scripts\demo.py</pre>
     <div class="callout">
       <strong>Status:</strong> M1 is under active construction. The toolchain, platform layer,
-      ECS, job system, math library, forward PBR renderer and the Blender scene importer are
-      implemented and verified; the Python host, physics and the live Blender link are next. See
+      ECS, job system, math library, forward PBR renderer, the Blender scene importer, the Python
+      host, the live Blender link and Jolt physics are implemented and verified; audio, gamepad
+      input and the glTF asset path are next. See
       <a href="current_state.html">Current state</a> for the verified list rather than the
       aspirational one, and <a href="blender_integration.html">Blender integration</a> for the
       scene pipeline and its reference comparisons.

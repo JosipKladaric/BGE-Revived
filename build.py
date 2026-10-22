@@ -37,6 +37,20 @@ BUILD = ROOT / "build"
 TOOLCHAIN = ROOT / ".toolchain" / "zig" / "zig.exe"
 OBJ = BUILD / "obj"
 BIN = BUILD / "bin"
+JOLT_ROOT = ROOT / "engine" / "third_party" / "jolt"
+JOLT_SOURCE = JOLT_ROOT / "Jolt"
+
+# Jolt is optional: the engine ships a small built-in solver and uses Jolt when
+# the source has been fetched with tools/fetch_jolt.py.
+JOLT_DEFINES = [
+    "-DJPH_OBJECT_LAYER_BITS=16",
+    "-DJPH_CROSS_PLATFORM_DETERMINISTIC",
+    "-DJPH_FLOATING_POINT_EXCEPTIONS_ENABLED=0",
+]
+JOLT_SKIP = ("\\Renderer\\", "\\UnitTests\\", "\\PerformanceTest\\", "\\HelloWorld\\", "\\Samples\\")
+
+# Set from --no-jolt; keeps the built-in solver even when Jolt is checked out.
+JOLT_ENABLED = True
 
 EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 
@@ -140,6 +154,18 @@ class Toolchain:
             cmd += ["-I", str(inc)]
         if py and src.suffix != ".c":
             cmd += ["-I", str(py["include"]), "-DBGE_WITH_PYTHON=1"]
+        if JOLT_ENABLED and JOLT_SOURCE.is_dir() and str(src).startswith(str(JOLT_SOURCE)):
+            cmd += ["-I", str(JOLT_ROOT)]
+            cmd += list(JOLT_DEFINES)
+            if config == "debug":
+                cmd += ["-DJPH_ENABLE_ASSERTS"]
+        elif str(src).startswith(str(ROOT / "engine" / "src")):
+            # The engine knows whether Jolt is available.
+            if JOLT_ENABLED and JOLT_SOURCE.is_dir():
+                cmd += ["-DBGE_WITH_JOLT=1"]
+                # jolt_physics.cpp includes the Jolt headers directly.
+                cmd += ["-I", str(JOLT_ROOT)]
+                cmd += list(JOLT_DEFINES)
         cmd += ["-c", str(src), "-o", str(out)]
         return cmd
 
@@ -210,15 +236,29 @@ def detect_python() -> dict | None:
     return None
 
 
-def collect_sources() -> tuple[list[Path], list[Path], list[Path], list[Path]]:
+def collect_jolt_sources() -> list[Path]:
+    """The Jolt Physics sources, when the optional dependency is present."""
+    if not JOLT_ENABLED or not JOLT_SOURCE.is_dir():
+        return []
+    sources: list[Path] = []
+    for path in sorted(JOLT_SOURCE.rglob("*.cpp")):
+        text = str(path)
+        if any(skip in text for skip in JOLT_SKIP):
+            continue
+        sources.append(path)
+    return sources
+
+
+def collect_sources() -> tuple[list[Path], list[Path], list[Path], list[Path], list[Path]]:
     engine_cpp: list[Path] = []
     c: list[Path] = []
     for d in SRC_DIRS:
         engine_cpp.extend(sorted(d.rglob("*.cpp")))
     app_cpp = sorted((ROOT / "sandbox" / "src").rglob("*.cpp"))
     game_cpp = sorted((ROOT / "game" / "src").rglob("*.cpp"))
+    jolt_cpp = collect_jolt_sources()
     c.append(ROOT / "engine" / "third_party" / "glad" / "src" / "gl.c")
-    return engine_cpp, app_cpp, game_cpp, c
+    return engine_cpp, app_cpp, game_cpp, jolt_cpp, c
 
 
 def collect_headers() -> list[Path]:
@@ -297,9 +337,9 @@ def build(args: argparse.Namespace) -> int:
     py = None if args.no_python else detect_python()
     config = "debug" if args.debug else "release"
 
-    engine_cpp, app_cpp, game_cpp, c = collect_sources()
+    engine_cpp, app_cpp, game_cpp, jolt_cpp, c = collect_sources()
     headers = collect_headers()
-    sources = engine_cpp + app_cpp + game_cpp + c
+    sources = engine_cpp + app_cpp + game_cpp + jolt_cpp + c
 
     base_flags = CXX_FLAGS[:]
     if args.verbose:
@@ -342,7 +382,7 @@ def build(args: argparse.Namespace) -> int:
     fp_file.write_text(current_fp)
 
     # Engine + sandbox
-    sandbox_objs = [object_path(config, s) for s in engine_cpp + app_cpp + c]
+    sandbox_objs = [object_path(config, s) for s in engine_cpp + app_cpp + jolt_cpp + c]
     sandbox_exe = BIN / f"bge_sandbox{EXE_SUFFIX}"
     link(toolchain, sandbox_objs, sandbox_exe, config, py, args.windows, args.verbose)
     copy_assets()
@@ -351,7 +391,7 @@ def build(args: argparse.Namespace) -> int:
     print(f"  Built {sandbox_exe.relative_to(ROOT)}")
 
     # Game template: the runtime a packaged game ships with.
-    game_objs = [object_path(config, s) for s in engine_cpp + game_cpp + c]
+    game_objs = [object_path(config, s) for s in engine_cpp + game_cpp + jolt_cpp + c]
     game_exe = BIN / f"bge_game{EXE_SUFFIX}"
     link(toolchain, game_objs, game_exe, config, py, args.windows, args.verbose)
     print(f"  Built {game_exe.relative_to(ROOT)}")
@@ -362,7 +402,7 @@ def build(args: argparse.Namespace) -> int:
         tests_exe = BIN / f"bge_tests{EXE_SUFFIX}"
         test_obj = object_path(config, test_src)
         compile_one(toolchain, test_src, test_obj, config, py, base_flags, args.verbose)
-        test_link = [object_path(config, s) for s in engine_cpp + c] + [test_obj]
+        test_link = [object_path(config, s) for s in engine_cpp + jolt_cpp + c] + [test_obj]
         link(toolchain, test_link, tests_exe, config, py, False, args.verbose)
         print(f"  Built {tests_exe.relative_to(ROOT)}")
         env = os.environ.copy()
@@ -396,6 +436,8 @@ def main() -> int:
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--release", action="store_true")
     parser.add_argument("--no-python", action="store_true")
+    parser.add_argument("--no-jolt", action="store_true",
+                        help="use the built-in solver even when Jolt is checked out")
     parser.add_argument("--compiler", choices=["auto", "zig", "mingw"], default="auto",
                         help="toolchain to use (default: auto, Zig first)")
     parser.add_argument("--jobs", type=int, default=0)
@@ -406,6 +448,9 @@ def main() -> int:
     if extra and extra[0] == "--":
         extra = extra[1:]
     args.extra = extra
+
+    global JOLT_ENABLED
+    JOLT_ENABLED = JOLT_SOURCE.is_dir() and not args.no_jolt
 
     if args.command == "clean":
         shutil.rmtree(BUILD, ignore_errors=True)

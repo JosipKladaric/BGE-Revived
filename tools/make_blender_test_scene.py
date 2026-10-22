@@ -364,6 +364,49 @@ def main():
     text.data.bevel_depth = 0.01
     text.data.materials.append(white_mat)
 
+    # An animated object: the exporter samples the transform animation.
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.55, segments=32, ring_count=16,
+                                         location=(-1.6, -2.6, 1.6))
+    animated = bpy.context.object
+    animated.name = "Animated Orb"
+    animated.data.materials.append(red_mat)
+    animated.rotation_mode = "XYZ"
+    for frame, location in ((1, (-1.6, -2.6, 1.6)), (30, (-1.6, -2.6, 4.2)),
+                            (60, (1.6, -2.6, 1.6)), (90, (-1.6, -2.6, 1.6))):
+        animated.location = location
+        animated.keyframe_insert(data_path="location", frame=frame)
+    animated.rotation_euler = (0.0, 0.0, 0.0)
+    animated.keyframe_insert(data_path="rotation_euler", frame=1)
+    animated.rotation_euler = (0.0, 0.0, math.pi * 2.0)
+    animated.keyframe_insert(data_path="rotation_euler", frame=90)
+
+    # Rigid bodies: a passive floor and three falling crates. The exporter
+    # writes these as physics bodies for the runtime.
+    def make_rigid_body(obj, body_type, mass=1.0):
+        bpy.ops.object.select_all(action="DESELECT")
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.rigidbody.object_add(type=body_type)
+        obj.rigid_body.collision_shape = "BOX"
+        obj.rigid_body.mass = mass
+        obj.rigid_body.friction = 0.6
+        obj.rigid_body.restitution = 0.12
+        obj.select_set(False)
+
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0.0, 2.6, 0.25))
+    physics_floor = bpy.context.object
+    physics_floor.name = "Physics Floor"
+    physics_floor.scale = (4.0, 3.0, 0.25)
+    physics_floor.data.materials.append(white_mat)
+    make_rigid_body(physics_floor, "PASSIVE")
+
+    for crate_index, (crate_x, crate_z) in enumerate(((-0.8, 3.0), (0.0, 4.2), (0.8, 5.4))):
+        bpy.ops.mesh.primitive_cube_add(size=0.6, location=(crate_x, 2.6, crate_z))
+        crate = bpy.context.object
+        crate.name = f"Physics Crate {crate_index + 1}"
+        crate.data.materials.append(green_mat)
+        make_rigid_body(crate, "ACTIVE", mass=0.8)
+
     # Lights: one of each Blender type.
     bpy.ops.object.light_add(type="SUN", location=(5.0, -5.0, 9.0))
     sun = bpy.context.object

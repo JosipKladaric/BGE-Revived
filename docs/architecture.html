@@ -178,9 +178,12 @@ tools/bge_export.py  ──▶  scene.bgescene  ──▶  scene_loader.cpp  ─
       through the ECS. Interpolation state is kept separately so rendering stays smooth.
     </p>
     <div class="callout">
-      <strong>M0 note:</strong> physics is not wired yet. The sandbox uses kinematic demo motion
-      only. Jolt integration is the first task of M1, after the renderer and scripting host are
-      stable.
+      <strong>Implemented:</strong> Jolt Physics 5.3.0 is vendored as an optional dependency
+      (<code>tools/fetch_jolt.py</code>) and compiled into the engine by both build paths. The
+      runtime creates bodies from Blender rigid body objects, steps them on the fixed timestep and
+      copies the simulated transforms back into the ECS. A small deterministic solver implements
+      the same <code>PhysicsBackend</code> interface and takes over when Jolt is not present, so
+      the engine still builds without the download.
     </div>
   </section>
 
@@ -226,7 +229,7 @@ tools/bge_export.py  ──▶  scene.bgescene  ──▶  scene_loader.cpp  ─
     </p>
     <ol style="color: var(--muted); font-size: 15px;">
       <li>Blender addon starts or connects to the runtime over a local socket.</li>
-      <li>Scene graph, meshes, materials, and transforms are sent incrementally.</li>
+      <li>Scenes, meshes, materials, and transforms are sent incrementally over that socket; frame pixels go the other way through a named shared memory region.</li>
       <li>Press Play in Blender: addon switches the runtime into play mode and mirrors input/state.</li>
       <li>Selecting an entity in Blender highlights it in the runtime and vice versa.</li>
       <li>Bake lighting, occlusion, and navigation data back into the cooked scene.</li>

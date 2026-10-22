@@ -199,6 +199,8 @@ bool save_bge_scene(Scene& scene, const Renderer& renderer, const std::string& p
         Mat4 matrix{Mat4::identity()};
         bool visible = true;
         bool cast_shadow = true;
+        bool has_physics = false;
+        RigidBody physics;
     };
     std::vector<ObjectRecord> objects;
 
@@ -235,6 +237,10 @@ bool save_bge_scene(Scene& scene, const Renderer& renderer, const std::string& p
         record.matrix = transform.world;
         record.visible = renderer_component.visible;
         record.cast_shadow = renderer_component.cast_shadow;
+        if (const RigidBody* rigid = scene.world().get<RigidBody>(e)) {
+            record.has_physics = true;
+            record.physics = *rigid;
+        }
         objects.push_back(record);
     });
 
@@ -352,8 +358,43 @@ bool save_bge_scene(Scene& scene, const Renderer& renderer, const std::string& p
         write_mat(json, "matrix", record.matrix);
         json.member("visible", record.visible);
         json.member("cast_shadow", record.cast_shadow);
+        if (record.has_physics) {
+            json.key("physics");
+            json.begin_object();
+            json.member("shape", record.physics.sphere ? "sphere" : "box");
+            json.member("static", record.physics.is_static);
+            json.member("mass", static_cast<double>(record.physics.mass));
+            json.member("friction", static_cast<double>(record.physics.friction));
+            json.member("restitution", static_cast<double>(record.physics.restitution));
+            write_vec(json, "half_extents", record.physics.half_extents);
+            json.member("radius", static_cast<double>(record.physics.radius));
+            json.end_object();
+        }
         json.end_object();
     }
+    json.end_array();
+
+    json.key("animations");
+    json.begin_array();
+    scene.world().each<Transform, Animation>([&](Entity e, Transform&, Animation& animation) {
+        if (animation.times.empty() || animation.matrices.size() != animation.times.size()) return;
+        json.begin_object();
+        const Name* n = scene.world().get<Name>(e);
+        json.member("name", n ? n->value : "Object");
+        json.member("fps", static_cast<double>(animation.fps));
+        json.member("start_time", static_cast<double>(animation.start_time));
+        json.key("times");
+        json.begin_array();
+        for (float time : animation.times) json.value_number(time);
+        json.end_array();
+        json.key("matrices");
+        json.begin_array();
+        for (const std::array<float, 16>& matrix : animation.matrices) {
+            for (float value : matrix) json.value_number(value);
+        }
+        json.end_array();
+        json.end_object();
+    });
     json.end_array();
 
     json.key("lights");

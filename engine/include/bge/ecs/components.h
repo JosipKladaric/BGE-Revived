@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -107,6 +108,17 @@ struct Bob {
     float frequency = 0.6f;
     float phase = 0.0f;
     float base_y = 0.0f;
+};
+
+// A rigid body driven by the physics world. The transform of the entity is
+// overwritten with the simulated transform every step.
+// A sampled transform animation, exported from Blender. The matrices are world
+// transforms sampled at regular intervals; the runtime interpolates them.
+struct Animation {
+    float fps = 30.0f;
+    float start_time = 0.0f;
+    std::vector<float> times;
+    std::vector<std::array<float, 16>> matrices;
 };
 
 // A rigid body driven by the physics world. The transform of the entity is

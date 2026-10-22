@@ -124,6 +124,38 @@ void Scene::update_transforms() {
 }
 
 void Scene::fixed_update(float dt) {
+    animation_time += dt;
+
+    // Sampled animations (exported from Blender) drive the transforms.
+    world_.each<Transform, Animation>([&](Entity, Transform& transform, Animation& animation) {
+        if (animation.times.empty() || animation.matrices.size() != animation.times.size()) return;
+        const float time = animation_time - animation.start_time;
+        const size_t count = animation.times.size();
+        if (time <= animation.times.front()) {
+            Mat4 first = Mat4::identity();
+            for (int i = 0; i < 16; ++i) first.m[i] = animation.matrices.front()[i];
+            decompose_trs(first, transform.position, transform.rotation, transform.scale);
+            return;
+        }
+        if (time >= animation.times.back()) {
+            Mat4 last = Mat4::identity();
+            for (int i = 0; i < 16; ++i) last.m[i] = animation.matrices.back()[i];
+            decompose_trs(last, transform.position, transform.rotation, transform.scale);
+            return;
+        }
+        size_t index = 0;
+        while (index + 1 < count && animation.times[index + 1] < time) ++index;
+        const float span = animation.times[index + 1] - animation.times[index];
+        const float factor = span > 1e-6f ? (time - animation.times[index]) / span : 0.0f;
+        Mat4 blended = Mat4::identity();
+        for (int i = 0; i < 16; ++i) {
+            const float a = animation.matrices[index][i];
+            const float b = animation.matrices[index + 1][i];
+            blended.m[i] = a + (b - a) * factor;
+        }
+        decompose_trs(blended, transform.position, transform.rotation, transform.scale);
+    });
+
     world_.each<Transform, Rotator>([&](Entity, Transform& t, Rotator& r) {
         Quat delta = Quat::from_axis_angle(r.axis, r.speed * dt);
         t.rotation = (delta * t.rotation).normalized();

@@ -71,8 +71,9 @@
         <li>Runtime scene serialization: the engine writes and reads the same format</li>
         <li>Embedded CPython host with a <code>bge</code> module (<code>bge.types</code>, <code>bge.objects</code>, <code>bge.app.handlers</code>)</li>
         <li>Built-in rigid body solver as a Jolt stand-in</li>
+        <li><strong>Jolt Physics 5.3.0</strong> vendored and driving the runtime, fed by Blender rigid body objects</li>
         <li>Prefabs, a cooked pack and a scene switching API</li>
-        <li>Jolt physics, character controller, collision events</li>
+        <li>Jolt follow-up: capsule/convex shapes, character controller, collision events</li>
         <li>Gamepad input, audio (miniaudio), debug UI</li>
         <li>glTF, PNG/DDS, hot reload, runtime profiler</li>
       </ul>
@@ -108,9 +109,15 @@
       <h3>Blender live link</h3>
       <ul>
         <li>Blender add-on: export, play, stop and package from the 3D View sidebar</li>
+        <li>Blender render engine: "BGE Revived" next to Cycles and EEVEE, rendering with the game engine</li>
+        <li>Socket transport: the engine serves scenes and frames over a local TCP port</li>
+        <li>Shared memory frames: the pixels travel through a named region, so the socket only carries small messages</li>
+        <li>Incremental live link: only the changed objects, transforms and geometry are transferred</li>
+        <li>Viewport preview: the rendered frame is drawn over the camera frame in the 3D View</li>
         <li>Live link: the engine reloads the scene in place when the scene file changes</li>
         <li>Engine preview: the engine renders the scene and the frames are mirrored into Blender</li>
         <li>Game template and packaging into a self contained game folder</li>
+        <li>Incremental updates for lights and cameras too</li>
         <li>Socket based push with incremental mesh, material and transform updates</li>
         <li>Bidirectional selection and entity inspection</li>
         <li>Bake lighting/occlusion back into engine data</li>
@@ -151,7 +158,7 @@
           <tr><td>Single-threaded runtime</td><td>Fork-join job system</td><td><span class="badge done">M0</span></td></tr>
           <tr><td>Frame-rate-coupled logic</td><td>120 Hz fixed step + interpolation</td><td><span class="badge done">M0</span></td></tr>
           <tr><td>Fixed-function renderer</td><td>OpenGL 4.6 PBR / RHI</td><td><span class="badge wip">M0</span></td></tr>
-          <tr><td>Old Bullet</td><td>Jolt Physics</td><td><span class="badge plan">M1</span></td></tr>
+          <tr><td>Old Bullet</td><td>Jolt Physics</td><td><span class="badge done">M1</span></td></tr>
           <tr><td>Blender-embedded editor</td><td>Standalone + live-link addon</td><td><span class="badge plan">M3</span></td></tr>
           <tr><td>No asset pipeline</td><td>glTF import + cooked packs</td><td><span class="badge plan">M2</span></td></tr>
           <tr><td>Weak tooling</td><td>Profiler, inspector, replay</td><td><span class="badge plan">M4</span></td></tr>

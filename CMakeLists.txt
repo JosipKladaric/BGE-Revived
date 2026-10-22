@@ -51,6 +51,33 @@ if(WIN32)
   target_link_libraries(bge_engine PUBLIC opengl32 gdi32 user32 ole32 shell32 winmm ws2_32)
 endif()
 
+# ----------------------------------------------------------------- jolt ----
+# Jolt is optional: tools/fetch_jolt.py downloads the source, and the engine
+# falls back to its built-in solver when the folder is missing.
+option(BGE_WITH_JOLT "Use the vendored Jolt Physics backend" ON)
+set(BGE_JOLT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/engine/third_party/jolt")
+if(BGE_WITH_JOLT AND EXISTS "${BGE_JOLT_ROOT}/Jolt/Jolt.h")
+  file(GLOB_RECURSE BGE_JOLT_SOURCES CONFIGURE_DEPENDS "${BGE_JOLT_ROOT}/Jolt/*.cpp")
+  list(FILTER BGE_JOLT_SOURCES EXCLUDE REGEX "/(Renderer|UnitTests|PerformanceTest|HelloWorld|Samples)/")
+  add_library(bge_jolt STATIC ${BGE_JOLT_SOURCES})
+  target_include_directories(bge_jolt PUBLIC "${BGE_JOLT_ROOT}")
+  target_compile_definitions(bge_jolt PUBLIC
+    JPH_OBJECT_LAYER_BITS=16
+    JPH_CROSS_PLATFORM_DETERMINISTIC
+    JPH_FLOATING_POINT_EXCEPTIONS_ENABLED=0)
+  target_compile_definitions(bge_jolt PRIVATE $<$<CONFIG:Debug>:JPH_ENABLE_ASSERTS>)
+  if(MSVC)
+    target_compile_options(bge_jolt PRIVATE /W0)
+  else()
+    target_compile_options(bge_jolt PRIVATE -w)
+  endif()
+  target_link_libraries(bge_engine PUBLIC bge_jolt)
+  target_compile_definitions(bge_engine PUBLIC BGE_WITH_JOLT=1)
+  message(STATUS "BGE: Jolt Physics backend enabled")
+else()
+  message(STATUS "BGE: Jolt Physics not found, using the built-in solver")
+endif()
+
 # --------------------------------------------------------------- python ----
 if(BGE_WITH_PYTHON)
   find_package(Python3 COMPONENTS Development.Embed QUIET)

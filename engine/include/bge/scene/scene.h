@@ -53,6 +53,9 @@ public:
     // Fixed-step gameplay/animation update.
     void fixed_update(float dt);
 
+    // The clock that drives the sampled animations.
+    float animation_time = 0.0f;
+
     // Copy the primary Camera component into the render camera state.
     void apply_camera_component();
 

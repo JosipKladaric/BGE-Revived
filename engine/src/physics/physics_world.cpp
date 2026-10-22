@@ -87,7 +87,7 @@ bool PhysicsWorld::is_sleeping(uint32_t body) const {
 }
 
 Vec3 PhysicsWorld::support(const Body& body, const Vec3& direction) const {
-    if (body.desc.shape == ShapeType::Sphere) {
+    if (body.desc.sphere) {
         Vec3 d = normalize(direction);
         return body.position + d * body.desc.radius;
     }
@@ -128,7 +128,7 @@ void PhysicsWorld::apply_ground(Body& body, float dt) const {
     if (!ground_enabled_ || body.desc.is_static) return;
 
     float lowest = 0.0f;
-    if (body.desc.shape == ShapeType::Sphere) {
+    if (body.desc.sphere) {
         lowest = body.position.y - body.desc.radius;
     } else {
         // The lowest corner of the oriented box.
@@ -169,9 +169,9 @@ void PhysicsWorld::collect_contacts(std::vector<Contact>& out) const {
 
             Vec3 delta = b.position - a.position;
             const float distance = length(delta);
-            const float radius_a = (a.desc.shape == ShapeType::Sphere) ? a.desc.radius
+            const float radius_a = (a.desc.sphere) ? a.desc.radius
                                                                         : length(a.desc.half_extents);
-            const float radius_b = (b.desc.shape == ShapeType::Sphere) ? b.desc.radius
+            const float radius_b = (b.desc.sphere) ? b.desc.radius
                                                                         : length(b.desc.half_extents);
 
             if (distance > radius_a + radius_b) continue;
@@ -181,10 +181,10 @@ void PhysicsWorld::collect_contacts(std::vector<Contact>& out) const {
             contact.b = static_cast<uint32_t>(j);
             contact.normal = distance > 1e-5f ? delta / distance : Vec3{0, 1, 0};
 
-            if (a.desc.shape == ShapeType::Sphere && b.desc.shape == ShapeType::Sphere) {
+            if (a.desc.sphere && b.desc.sphere) {
                 contact.penetration = (a.desc.radius + b.desc.radius) - distance;
                 contact.point = a.position + contact.normal * a.desc.radius;
-            } else if (a.desc.shape == ShapeType::Box && b.desc.shape == ShapeType::Box) {
+            } else if (true) {
                 // Axis aligned overlap of the rotated boxes, approximated with the
                 // world aligned extents of the rotated box.
                 Vec3 extent_a{0, 0, 0};
@@ -219,8 +219,8 @@ void PhysicsWorld::collect_contacts(std::vector<Contact>& out) const {
                 contact.point = (a.position + b.position) * 0.5f;
             } else {
                 // Sphere against box: use the closest point on the box.
-                const Body& sphere = (a.desc.shape == ShapeType::Sphere) ? a : b;
-                const Body& box = (a.desc.shape == ShapeType::Sphere) ? b : a;
+                const Body& sphere = (a.desc.sphere) ? a : b;
+                const Body& box = (a.desc.sphere) ? b : a;
                 Vec3 local = box.rotation.rotate(box.position - sphere.position);
                 Vec3 closest{clampf(local.x, -box.desc.half_extents.x, box.desc.half_extents.x),
                              clampf(local.y, -box.desc.half_extents.y, box.desc.half_extents.y),
@@ -230,7 +230,7 @@ void PhysicsWorld::collect_contacts(std::vector<Contact>& out) const {
                 if (gap > sphere.desc.radius) continue;
                 Vec3 normal_local = gap > 1e-5f ? difference / gap : Vec3{0, 1, 0};
                 contact.normal = box.rotation.rotate(normal_local);
-                if (a.desc.shape != ShapeType::Sphere) contact.normal = -contact.normal;
+                if (!a.desc.sphere) contact.normal = -contact.normal;
                 contact.penetration = sphere.desc.radius - gap;
                 contact.point = sphere.position - normal_local * sphere.desc.radius;
             }

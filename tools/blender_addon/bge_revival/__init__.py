@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 import bpy
-from bpy.props import BoolProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy.types import AddonPreferences, Operator, Panel
 
 bl_info = {
@@ -116,10 +116,13 @@ def load_client(root: Path):
 class ExportOptions:
     """The small options object the exporter expects."""
 
-    def __init__(self, selected: bool = False, max_texture: int = 2048, no_textures: bool = False):
+    def __init__(self, selected: bool = False, max_texture: int = 2048, no_textures: bool = False,
+                 local_space: bool = False):
         self.selected = selected
         self.max_texture = max_texture
         self.no_textures = no_textures
+        # Incremental updates keep the geometry in the object's own space.
+        self.local_space = local_space
 
 
 def export_current_scene(root: Path, output: Path, selected_only: bool = False) -> Path:
@@ -171,6 +174,13 @@ def _engine_client():
     folder = Path(prefs.export_folder).expanduser() / "render"
     folder.mkdir(parents=True, exist_ok=True)
 
+    # The engine needs a scene to start with; it is replaced over the socket as
+    # soon as the author changes anything.
+    try:
+        export_current_scene(root, folder)
+    except Exception as exc:
+        print(f"[BGE] could not export the preview scene: {exc}")
+
     process = _state.get("engine_process")
     if process is None or process.poll() is not None:
         try:
@@ -208,6 +218,8 @@ def _stop_engine() -> None:
         process.terminate()
     _state["engine_process"] = None
     _state["preview_enabled"] = False
+    _state["preview_texture"] = None
+    _state["preview_texture_stamp"] = None
     _remove_overlay()
 
 
@@ -216,27 +228,151 @@ def _stop_engine() -> None:
 def _mark_dirty(scene, depsgraph=None):
     if is_running() or _state.get("client") is not None:
         _state["dirty"] = True
+        if depsgraph is not None:
+            # The update list is only valid inside the handler, so the names are
+            # collected right away.
+            names = []
+            for update in depsgraph.updates:
+                if isinstance(update.id, bpy.types.Object):
+                    names.append(update.id.name)
+            if names:
+                _state["updated_names"] = names
 
 
-def _srgb_to_linear(data: bytes, width: int, height: int):
-    """Converts the engine's sRGB frame into linear floats for Blender."""
+def _mesh_signature(obj, depsgraph):
+    """A cheap fingerprint of an object's geometry, used to detect mesh edits."""
+    try:
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        if mesh is None:
+            return None
+        count = len(mesh.vertices)
+        checksum = 0
+        step = max(1, count // 64)
+        for index in range(0, count, step):
+            vertex = mesh.vertices[index].co
+            checksum = (checksum * 31 + int(vertex.x * 1000.0) + int(vertex.y * 1000.0) * 7 +
+                        int(vertex.z * 1000.0) * 13) & 0xFFFFFFFF
+        evaluated.to_mesh_clear()
+        return (count, checksum)
+    except Exception:
+        return None
+
+
+def _push_incremental(names=None, depsgraph=None):
+    """Pushes only what changed: transforms, new geometry and new objects."""
+    client = _state.get("client")
+    if client is None:
+        return False
+
+    root = Path(_state.get("engine_root") or str(find_engine_root()))
+    try:
+        exporter = load_exporter(root)
+    except Exception:
+        return False
+
+    if names is None:
+        names = _state.get("updated_names") or []
+    if depsgraph is None:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+
+    scene = bpy.context.scene
+    pushed = _state.setdefault("pushed", {})
+    mesh_counter = _state.setdefault("mesh_counter", 0)
+
+    transforms = []
+    objects = []
+    removals = []
+    meshes = []
+
+    for name in names:
+        obj = bpy.data.objects.get(name)
+        if obj is None or obj.name not in scene.objects or obj.hide_render:
+            if name in pushed:
+                removals.append(name)
+                pushed.pop(name, None)
+            continue
+        if obj.type in {"LIGHT", "CAMERA"}:
+            # Lights and cameras are only handled by a full export.
+            return False
+        if obj.type not in {"MESH", "CURVE", "SURFACE", "META", "FONT"}:
+            continue
+
+        matrix = [float(obj.matrix_world[row][column]) for column in range(4) for row in range(4)]
+        record = pushed.get(name)
+
+        if record is None:
+            record = {"mesh_id": 0, "signature": None, "matrix": None}
+            pushed[name] = record
+
+        signature = _mesh_signature(obj, depsgraph)
+        if signature != record["signature"]:
+            # The geometry changed: upload it and rebind the object.
+            try:
+                options = ExportOptions(local_space=True)
+                material_index = {}
+                material_records = []
+                image_cache = {}
+                primitives = exporter.mesh_primitives(
+                    obj, depsgraph, options, material_index, material_records,
+                    Path(_state.get("preview_dir", ".")), image_cache, local_space=True)
+            except Exception as exc:
+                print(f"[BGE] could not export '{name}': {exc}")
+                continue
+            if not primitives:
+                continue
+            primitive = primitives[0]
+            mesh_counter += 1
+            mesh_id = mesh_counter
+            meshes.append((mesh_id, primitive["vertices"], primitive["indices"]))
+            record["mesh_id"] = mesh_id
+            record["signature"] = signature
+            objects.append((name, mesh_id, 0, True, matrix))
+            record["matrix"] = matrix
+        elif record["matrix"] != matrix:
+            transforms.append((name, matrix))
+            record["matrix"] = matrix
+
+    try:
+        if removals:
+            client.push_remove(removals)
+        for mesh_id, vertices, indices in meshes:
+            client.push_mesh(mesh_id, vertices, indices)
+        if objects:
+            client.push_objects(objects)
+        if transforms:
+            client.push_transforms(transforms)
+    except Exception as exc:
+        print(f"[BGE] incremental update failed: {exc}")
+        return False
+
+    _state["updated_names"] = []
+    return bool(removals or objects or transforms or meshes)
+
+
+def _bytes_to_floats(data: bytes, width: int, height: int):
+    """Converts the engine's sRGB frame into float pixels for Blender.
+
+    The engine writes display referred sRGB values, so they are stored in a
+    "Non-Color" image: both the file that Blender writes and the image editor
+    then show exactly what the engine produced.
+    """
     try:
         import numpy as np
         array = np.frombuffer(data, dtype=np.uint8).reshape(height, width, 4)
-        colour = array[:, :, :3].astype(np.float32) / 255.0
-        linear = np.where(colour <= 0.04045, colour / 12.92,
-                          ((colour + 0.055) / 1.055) ** 2.4)
-        out = np.ones((height, width, 4), dtype=np.float32)
-        out[:, :, :3] = linear
-        return out.ravel()
+        return (array.astype(np.float32) / 255.0).ravel()
     except Exception:
-        values = []
-        for i in range(0, len(data), 4):
-            for channel in data[i:i + 3]:
-                c = channel / 255.0
-                values.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
-            values.append(data[i + 3] / 255.0)
-        return values
+        return [value / 255.0 for value in data]
+
+
+def _debug_log(message: str) -> None:
+    """Writes a diagnostic line next to the export folder (GUI mode has no console)."""
+    try:
+        folder = Path(_state.get("preview_dir", ".")).parent
+        with open(folder / "preview_debug.log", "a", encoding="utf-8") as handle:
+            handle.write(message + "\n")
+    except Exception:
+        pass
 
 
 def _update_preview_image():
@@ -245,12 +381,17 @@ def _update_preview_image():
     if client is None:
         return
     try:
-        client.send({"cmd": "frame"})
-        reply, payload = client.receive()
-        if reply.get("cmd") != "frame" or not reply.get("ok", False):
-            return
-        width = int(reply["width"])
-        height = int(reply["height"])
+        if getattr(client, "has_shared", False):
+            # The frame bytes live in shared memory, so the preview can take the
+            # newest one without asking the engine. No round trip, no waiting.
+            frame = client.latest_frame()
+            if frame is None:
+                return  # nothing new since the last tick
+        else:
+            # Socket fallback: the request is synchronous, so the preview always
+            # shows the current scene.
+            frame = client.request_frame()
+        width, height, payload = frame
         if not payload:
             return
 
@@ -262,9 +403,11 @@ def _update_preview_image():
                                         alpha=False, float_buffer=True)
             image.colorspace_settings.name = "Non-Color"  # the pixels are already linear
             _state["preview_image"] = image
-        image.pixels.foreach_set(_srgb_to_linear(payload, width, height))
+        image.pixels.foreach_set(_bytes_to_floats(payload, width, height))
         image.update()
-        _state["preview_stamp"] = time.time()
+        # A counter, not a timestamp: it is the change token for the viewport
+        # texture cache, and timestamps can collide inside one clock tick.
+        _state["preview_stamp"] = (_state.get("preview_stamp") or 0.0) + 1.0
 
         # Show it in any open image editor.
         screen = bpy.context.screen
@@ -285,9 +428,13 @@ def _watch_timer():
         if _state["dirty"]:
             _state["dirty"] = False
             _state["last_export"] = time.time()
+            depsgraph = _state.pop("updated", None)
+            depsgraph = _state.pop("updated", None)
             root = Path(_state["engine_root"] or str(find_engine_root()))
             prefs = bpy.context.preferences.addons["bge_revival"].preferences
-            export_current_scene(root, live_export_folder(prefs))
+            if not _push_incremental():
+                # Fall back to a full export when the change is not incremental.
+                export_current_scene(root, live_export_folder(prefs))
         _update_preview_image()
     except Exception as exc:  # never let a timer error kill Blender
         print(f"[BGE] live export failed: {exc}")
@@ -298,6 +445,41 @@ def _watch_timer():
 # The rendered frame is drawn in the 3D View so the author can see the game
 # while they work. Everything is guarded, because the GPU image API differs
 # between Blender versions.
+
+def _camera_frame_corners(context, region):
+    """The camera frame corners inside a 3D View region.
+
+    Blender 4.x has no hook for a custom engine to draw the viewport, so the
+    game view is drawn over the camera frame instead: the author keeps editing
+    while the game shows exactly what the camera sees.
+
+    Returns the four corners (top left, top right, bottom right, bottom left) in
+    region pixels, or None when the view is not a camera view.
+    """
+    view = region.data
+    if view.view_perspective != "CAMERA":
+        return None
+    camera = context.scene.camera
+    if camera is None:
+        return None
+    try:
+        from bpy_extras import view3d_utils
+
+        corners = []
+        for corner in camera.data.view_frame(scene=context.scene):
+            world = camera.matrix_world @ corner
+            position = view3d_utils.location_3d_to_region_2d(region, view, world)
+            if position is None:
+                return None
+            corners.append((position.x, position.y))
+    except Exception:
+        return None
+    if len(corners) != 4:
+        return None
+    # view_frame returns top right, bottom right, bottom left, top left.
+    top_right, bottom_right, bottom_left, top_left = corners
+    return [top_left, top_right, bottom_right, bottom_left]
+
 
 def _draw_preview_overlay():
     if not _state.get("preview_enabled"):
@@ -319,44 +501,54 @@ def _draw_preview_overlay():
     except Exception:
         return
 
+    # The GPU texture is a copy of the image, so it is rebuilt whenever the
+    # frame changed. It must *not* be rebuilt on every redraw: the 3D View
+    # redraws while the user moves the mouse, and a 5 MB texture upload per
+    # redraw is what made the preview feel sluggish.
+    stamp = _state.get("preview_stamp")
     texture = _state.get("preview_texture")
-    if texture is None:
+    if texture is None or _state.get("preview_texture_stamp") != stamp:
         try:
-            texture = image.gl_load()
-        except Exception:
-            texture = None
-        if texture is None:
-            try:
-                texture = gpu.types.GPUTexture(image.size[:], format="RGBA16F", data=image.pixels[:])
-            except Exception:
-                return
+            import numpy as np
+
+            pixels = np.empty(len(image.pixels), dtype=np.float32)
+            image.pixels.foreach_get(pixels)
+            buffer = gpu.types.Buffer("FLOAT", pixels.size, pixels)
+            texture = gpu.types.GPUTexture(image.size[:], format="RGBA16F", data=buffer)
+        except Exception as exc:
+            _debug_log(f"overlay texture failed: {exc}")
+            return
         _state["preview_texture"] = texture
+        _state["preview_texture_stamp"] = stamp
 
     prefs = bpy.context.preferences.addons["bge_revival"].preferences
-    full = prefs.preview_fullscreen
-    if full:
-        width = region.width * 0.9
-        height = width * (image.size[1] / max(image.size[0], 1))
-        if height > region.height * 0.9:
-            height = region.height * 0.9
-            width = height * (image.size[0] / max(image.size[1], 1))
-        x = (region.width - width) * 0.5
-        y = (region.height - height) * 0.5
-    else:
+    mode = prefs.preview_mode
+    corners = None
+
+    if mode == "CAMERA":
+        corners = _camera_frame_corners(bpy.context, region)
+
+    if corners is None:
+        # No camera frame (not a camera view): fall back to the corner overlay.
         width = region.width * 0.28
         height = width * (image.size[1] / max(image.size[0], 1))
         x = region.width - width - 18.0
         y = 18.0
+        corners = [(x, y + height), (x + width, y + height), (x + width, y), (x, y)]
 
-    corners = [(x, y), (x + width, y), (x + width, y + height), (x, y + height)]
-    uvs = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    # The image is stored bottom up, so the top of the frame uses v = 1.
+    uvs = [(0.0, 1.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.0)]
     try:
         gpu.state.blend_set("ALPHA")
+        # The viewport draws with depth testing, which would hide the overlay.
+        gpu.state.depth_test_set("NONE")
         batch = batch_for_shader(shader, "TRI_FAN", {"pos": corners, "texCoord": uvs})
         shader.uniform_sampler("image", texture)
         batch.draw(shader)
+        gpu.state.depth_test_set("LESS_EQUAL")
         gpu.state.blend_set("NONE")
-    except Exception:
+    except Exception as exc:
+        _debug_log(f"overlay draw failed: {exc}")
         return
 
 
@@ -367,8 +559,10 @@ def _add_overlay() -> None:
         _state["overlay_handle"] = bpy.types.SpaceView3D.draw_handler_add(
             _draw_preview_overlay, (), "WINDOW", "POST_PIXEL"
         )
-    except Exception:
+        print("[BGE] viewport overlay registered")
+    except Exception as exc:
         _state["overlay_handle"] = None
+        print(f"[BGE] the viewport overlay could not be registered: {exc}")
 
 
 def _remove_overlay() -> None:
@@ -429,22 +623,70 @@ class BGE_RenderEngine(bpy.types.RenderEngine):
             return
 
         # Blender expects the result in linear space; the engine writes sRGB.
-        linear = _srgb_to_linear(pixels, frame_width, frame_height)
+        linear = _bytes_to_floats(pixels, frame_width, frame_height)
         image = bpy.data.images.get("BGE Render")
         if image is None or tuple(image.size) != (frame_width, frame_height):
             if image is not None:
                 bpy.data.images.remove(image)
             image = bpy.data.images.new("BGE Render", width=frame_width, height=frame_height,
                                         alpha=False, float_buffer=True)
+            image.colorspace_settings.name = "Non-Color"  # the pixels are already linear
         image.pixels.foreach_set(linear)
         image.update()
 
+        # Blender does not expose the render result buffer to Python engines, so
+        # the image is written to the output path itself. Blender writes its own
+        # (empty) result afterwards, so the final write happens in the
+        # render_write handler below.
+        _state["render_image"] = image
+        _state["render_paths"] = _render_output_paths(scene)
+
         result = bpy.data.images.get("Render Result")
-        if result is not None:
+        if result is not None and tuple(result.size) == (frame_width, frame_height):
             try:
                 result.pixels.foreach_set(linear)
-            except Exception as exc:
-                print(f"[BGE] could not write the render result: {exc}")
+            except Exception:
+                pass
+
+        screen = bpy.context.screen
+        if screen:
+            for area in screen.areas:
+                if area.type == "IMAGE_EDITOR":
+                    area.spaces.active.image = image
+
+
+def _render_output_paths(scene):
+    """The files Blender writes for this render: the still path and the frame path."""
+    paths = []
+    if scene.render.filepath:
+        paths.append(bpy.path.abspath(scene.render.filepath))
+    try:
+        paths.append(scene.render.frame_path(frame=scene.frame_current))
+    except Exception:
+        pass
+    unique = []
+    for path in paths:
+        if path and path not in unique:
+            unique.append(path)
+    return unique
+
+
+def _write_render_output(scene, *args):
+    """Writes the engine's frame over Blender's placeholder output.
+
+    Blender writes its own (empty) result after the render, so the image is
+    written in the render_complete handler, which runs last.
+    """
+    image = _state.get("render_image")
+    if image is None:
+        return
+    for path in _state.get("render_paths", []):
+        try:
+            image.filepath_raw = path
+            image.file_format = scene.render.image_settings.file_format
+            image.save()
+        except Exception as exc:
+            print(f"[BGE] could not write {path}: {exc}")
 
 
 # ------------------------------------------------------------- operators ----
@@ -666,10 +908,15 @@ class BGE_AddonPreferences(AddonPreferences):
         description="Draw the rendered frame in the 3D View while you edit",
         default=True,
     )
-    preview_fullscreen: BoolProperty(
-        name="Large overlay",
-        description="Draw the preview large instead of as a corner overlay",
-        default=False,
+    preview_mode: EnumProperty(
+        name="Overlay",
+        description="Where the rendered frame is drawn in the 3D View",
+        items=[
+            ("CAMERA", "Camera frame", "Draw the game over the camera frame"),
+            ("CORNER", "Corner", "Draw the game in the corner of the 3D View"),
+            ("OFF", "Off", "Do not draw the game in the 3D View"),
+        ],
+        default="CAMERA",
     )
 
     def draw(self, context):
@@ -711,7 +958,7 @@ class BGE_PT_panel(Panel):
         row.operator("bge.preview_stop", icon="PAUSE")
         box.operator("bge.preview_window", icon="IMAGE")
         box.prop(prefs, "preview_overlay")
-        box.prop(prefs, "preview_fullscreen")
+        box.prop(prefs, "preview_mode")
 
         layout.separator()
         layout.operator("bge.package", icon="PACKAGE")
@@ -734,6 +981,8 @@ def register():
         bpy.utils.register_class(cls)
     if bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_mark_dirty)
+    if hasattr(bpy.app.handlers, "render_complete"):
+        bpy.app.handlers.render_complete.append(_write_render_output)
 
 
 def unregister():
@@ -750,6 +999,8 @@ def unregister():
         _state["timer"] = None
     if bpy.app.handlers.depsgraph_update_post and _mark_dirty in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_mark_dirty)
+    if hasattr(bpy.app.handlers, "render_complete") and _write_render_output in bpy.app.handlers.render_complete:
+        bpy.app.handlers.render_complete.remove(_write_render_output)
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)
 
