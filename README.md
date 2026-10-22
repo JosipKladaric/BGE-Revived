@@ -39,6 +39,9 @@ that `.toolchain/zig/zig.exe` exists, or point the `ZIG` environment variable at
 ## Build, run, test
 
 ```bat
+git clone https://github.com/JosipKladaric/BGE-Revived.git
+cd BGE-Revived
+
 python build.py                     :: engine + sandbox
 python build.py run                 :: build and launch the procedural demo
 python build.py test                :: foundation tests
