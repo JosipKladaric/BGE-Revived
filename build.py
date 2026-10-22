@@ -77,7 +77,8 @@ LINK_LIBS = ["-lopengl32", "-lgdi32", "-luser32", "-lole32", "-lshell32", "-lwin
 SRC_DIRS = [ROOT / "engine" / "src"]
 
 
-def find_zig() -> Path:
+def zig_path() -> Path | None:
+    """Locates a usable Zig: the ZIG override, the vendored copy, or PATH."""
     env = os.environ.get("ZIG")
     if env:
         p = Path(env)
@@ -86,8 +87,13 @@ def find_zig() -> Path:
     if TOOLCHAIN.is_file():
         return TOOLCHAIN
     found = shutil.which("zig")
-    if found:
-        return Path(found)
+    return Path(found) if found else None
+
+
+def find_zig() -> Path:
+    path = zig_path()
+    if path:
+        return path
     sys.exit(
         "error: Zig not found.\n"
         "  Place Zig at .toolchain/zig/zig.exe or set the ZIG environment variable."
@@ -206,9 +212,10 @@ def select_toolchain(name: str) -> Toolchain:
                 "  Install it under .toolchain/mingw64 or set BGE_MINGW_ROOT."
             )
         return Toolchain("mingw", exe)
-    # auto: prefer the vendored Zig toolchain, fall back to MinGW.
-    if TOOLCHAIN.is_file() or shutil.which("zig"):
-        return Toolchain("zig", find_zig())
+    # auto: prefer Zig (override, vendored copy or PATH), fall back to MinGW.
+    zig = zig_path()
+    if zig:
+        return Toolchain("zig", zig)
     exe = find_mingw()
     if exe:
         return Toolchain("mingw", exe)
